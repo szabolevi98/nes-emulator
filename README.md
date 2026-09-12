@@ -87,6 +87,20 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 
 The debugger panel folds out beside the screen and shows the register file, the beam position and the same instruction trace the processor was built against.
 
+## Release build
+
+The release artifact is a single self contained executable that runs without a .NET installation. The settings live in a publish profile, so Visual Studio and the command line produce the same file:
+
+```
+dotnet publish src/NesEmulator/NesEmulator.csproj -p:PublishProfile=win-x64-single-file
+```
+
+That leaves one 49 MB `publish/NesEmulator.exe`, which can be copied anywhere and double clicked. It also accepts a cartridge path on the command line:
+
+```
+NesEmulator.exe roms\demo.nes
+```
+
 ## Layout
 
 - `src/NesEmulator.Core/` — the console itself, with no user interface dependencies, so the tests can run it headless

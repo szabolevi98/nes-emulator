@@ -432,3 +432,8 @@ FodyWeavers.xsd
 # credentials. This project only publishes to a folder, so its profile is just the
 # release build settings and belongs in the repository.
 !src/DiskAtlas/Properties/PublishProfiles/*.pubxml
+
+# The template excludes publish profiles because web deploy ones can carry database
+# credentials. This project only publishes to a folder, so its profile is just the
+# release build settings and belongs in the repository.
+!src/NesEmulator/Properties/PublishProfiles/*.pubxml
