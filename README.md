@@ -25,7 +25,7 @@ How the interesting parts work, and which hardware quirks had to be reproduced r
 
 Two things are measured here. One is a suite of 239 checks that runs offline with every build. The other is the public test ROMs, which are a different kind of instrument: they are written to break emulators on cycle-exact edges, not to check whether games run. Passing all of them is what "cycle-perfect" means, and this emulator is not there yet.
 
-| | Passed | |
+| Measure | Passed | What it covers |
 |---|---:|---|
 | **CPU bus-cycle vectors** | **2,560,000 / 2,560,000** | Every one of the 256 opcodes: registers, memory, cycle counts, and each bus address, value and direction |
 | **Processor behaviour and instruction timing** | **25 / 26** | Instruction behaviour, timing, page wrapping, dummy reads and writes, reset |
@@ -83,7 +83,7 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 
 ![The demo cartridge](docs/demo.png)
 
-| | |
+| Control | Keys |
 |---|---|
 | Player one | Arrows = directions, X = A, Z = B, Enter = Start, Shift = Select |
 | Player two | WASD = directions, G = A, F = B, R = Start, T = Select |
