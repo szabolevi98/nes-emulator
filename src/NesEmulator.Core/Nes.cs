@@ -35,6 +35,8 @@ public sealed class Nes
 
         // The processor drives the clock for everything else.
         Cpu.OnCycle = Tick;
+        Cpu.OnCycleComplete = CompleteTick;
+        Cpu.NmiInput = () => Ppu.NmiLine;
 
         Cpu.Reset();
     }
@@ -67,7 +69,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E02; // "NES" and a format version
+    private const uint StateMagic = 0x53454E03; // "NES" and a format version
+    private const uint LegacyStateMagic = 0x53454E02;
 
     /// <summary>
     /// Writes everything that makes this console what it is at this instant. The
@@ -110,9 +113,11 @@ public sealed class Nes
     {
         BinaryReader reader = new(stream, System.Text.Encoding.UTF8, leaveOpen: true);
 
-        if (reader.ReadUInt32() != StateMagic)
+        uint magic = reader.ReadUInt32();
+        bool legacy = magic == LegacyStateMagic;
+        if (magic != StateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. This version requires a v2 state.");
+            throw new InvalidDataException("Unsupported save state format. A v2 or v3 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -128,20 +133,22 @@ public sealed class Nes
         using MemoryStream current = new();
         WriteStatePayload(new BinaryWriter(current));
         int length = reader.ReadInt32();
-        if (length != current.Length)
+        // v3 adds the CPU's sampled NMI line and the PPU's previous-dot render
+        // latch. The old PPU pending-event byte becomes its suppression latch.
+        if (length != current.Length - (legacy ? 2 : 0))
             throw new InvalidDataException("The save state has an incompatible size.");
         byte[] checksum = reader.ReadBytes(32);
         byte[] data = reader.ReadBytes(length);
         if (data.Length != length || !checksum.AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(data)))
             throw new InvalidDataException("The save state is incomplete or damaged.");
 
-        ReadStatePayload(new BinaryReader(new MemoryStream(data)));
+        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy);
     }
 
-    private void ReadStatePayload(BinaryReader reader)
+    private void ReadStatePayload(BinaryReader reader, bool legacy)
     {
-        Cpu.LoadState(reader);
-        Ppu.LoadState(reader);
+        Cpu.LoadState(reader, legacy);
+        bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy);
         Apu.LoadState(reader);
         Bus.LoadState(reader);
         Mapper.LoadState(reader);
@@ -152,25 +159,29 @@ public sealed class Nes
         {
             reader.ReadExactly(Cartridge.Chr);
         }
+        if (legacy) Cpu.RestoreLegacyNmiInput(Ppu.NmiLine, legacyPpuNmiPending);
     }
 
     /// <summary>
-    /// One processor cycle for the rest of the console: the sound unit once, the
-    /// picture unit three times. The processor calls this as it spends each cycle,
-    /// so the three stay in step through an instruction rather than after it.
+    /// Begins a CPU bus cycle: clock the APU and the first two PPU dots. The
+    /// remaining dot is clocked by CompleteTick after the read or write, keeping
+    /// register accesses and interrupt sampling on distinct phases.
     /// </summary>
     private void Tick()
     {
         Apu.Step();
 
-        for (int dot = 0; dot < 3; dot++)
+        // This NTSC clock alignment places the register access before the last
+        // PPU dot of the CPU cycle. NMI is sampled after that final dot.
+        for (int dot = 0; dot < 2; dot++)
         {
             Ppu.Step();
-            if (Ppu.ConsumeNmi())
-            {
-                Cpu.RaiseNmi();
-            }
         }
+    }
+
+    private void CompleteTick()
+    {
+        Ppu.Step();
         Cpu.SetIrqLine(Apu.IrqPending || Mapper.IrqPending);
     }
 

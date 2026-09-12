@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NesEmulator.Core\NesEmulator.Core.csproj" />
+    <EmbeddedResource Include="Fixtures\*.state.gz" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

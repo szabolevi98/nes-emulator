@@ -53,6 +53,7 @@ public sealed class Cpu6502(IBus bus)
     private bool _nmiReady;
     private bool _nmiSample;
     private bool _previousNmiSample;
+    private bool _lastNmiLine;
     private bool _stepping;
     private byte _jamPhase;
 
@@ -67,6 +68,7 @@ public sealed class Cpu6502(IBus bus)
         Jammed = false;
         _jamPhase = 0;
         _nmiPending = false;
+        _lastNmiLine = false;
         _irqLine = false;
         Read(PC);
         Read(PC);
@@ -98,6 +100,12 @@ public sealed class Cpu6502(IBus bus)
     /// register partway through and see the value the hardware would have shown.
     /// </summary>
     public Action? OnCycle { get; set; }
+
+    /// <summary>Completes the bus cycle before interrupt input sampling.</summary>
+    public Action? OnCycleComplete { get; set; }
+
+    /// <summary>Logical assertion of the NMI input, sampled after the bus access.</summary>
+    public Func<bool>? NmiInput { get; set; }
 
     /// <summary>Runs one instruction, or services a pending interrupt. Returns the cycles it cost.</summary>
     public int Step()
@@ -145,6 +153,14 @@ public sealed class Cpu6502(IBus bus)
     {
         Cycles++;
         OnCycle?.Invoke();
+    }
+
+    private void CompleteTick()
+    {
+        OnCycleComplete?.Invoke();
+        bool line = NmiInput?.Invoke() ?? false;
+        if (line && !_lastNmiLine) _nmiPending = true;
+        _lastNmiLine = line;
         _previousIrqSample = _irqSample;
         _irqSample = _irqLine && (P & FlagInterruptDisable) == 0;
         _previousNmiSample = _nmiSample;
@@ -154,13 +170,16 @@ public sealed class Cpu6502(IBus bus)
     private byte Read(ushort address)
     {
         ConsumeTick();
-        return _bus.Read(address);
+        byte value = _bus.Read(address);
+        CompleteTick();
+        return value;
     }
 
     private void Write(ushort address, byte value)
     {
         ConsumeTick();
         _bus.Write(address, value);
+        CompleteTick();
     }
 
     // ----------------------------------------------------------- save states
@@ -185,9 +204,10 @@ public sealed class Cpu6502(IBus bus)
         writer.Write(_nmiReady);
         writer.Write(_nmiSample);
         writer.Write(_previousNmiSample);
+        writer.Write(_lastNmiLine);
     }
 
-    internal void LoadState(BinaryReader reader)
+    internal void LoadState(BinaryReader reader, bool legacy = false)
     {
         A = reader.ReadByte();
         X = reader.ReadByte();
@@ -207,6 +227,13 @@ public sealed class Cpu6502(IBus bus)
         _nmiReady = reader.ReadBoolean();
         _nmiSample = reader.ReadBoolean();
         _previousNmiSample = reader.ReadBoolean();
+        _lastNmiLine = !legacy && reader.ReadBoolean();
+    }
+
+    internal void RestoreLegacyNmiInput(bool line, bool pending)
+    {
+        _lastNmiLine = line;
+        _nmiPending |= pending;
     }
 
     // ------------------------------------------------------------ addressing

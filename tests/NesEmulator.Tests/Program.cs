@@ -883,7 +883,7 @@ Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
     for (int i = 0; i < (242 * 341) + 2 && !raised; i++)
     {
         ppu.Step();
-        raised = ppu.ConsumeNmi();
+        raised = ppu.NmiLine;
     }
 
     Check("ppu: asks for an interrupt when the frame ends", raised);
@@ -901,6 +901,114 @@ Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
     }
 
     Check("ppu: a frame is 89,342 cycles", steps == 341 * 262, $"got {steps}");
+}
+
+// ----------------------------------------------------- PPU/CPU timing edges
+
+byte[] BuildNmiTimingRom()
+{
+    byte[] rom = BuildRom(1, 1);
+    // LDA $2002; JMP $C003. NMI increments $10 and returns.
+    byte[] code = [0xAD, 0x02, 0x20, 0x4C, 0x03, 0xC0];
+    code.CopyTo(rom, 16);
+    rom[16 + 0x20] = 0xE6; rom[16 + 0x21] = 0x10; rom[16 + 0x22] = 0x40;
+    rom[16 + 0x3FFA] = 0x20; rom[16 + 0x3FFB] = 0xC0;
+    rom[16 + 0x3FFC] = 0x00; rom[16 + 0x3FFD] = 0xC0;
+    return rom;
+}
+
+void AdvancePpuTo(Ppu2C02 ppu, int scanline, int dot)
+{
+    for (int i = 0; i < 341 * 262 * 2; i++)
+    {
+        if (ppu.Scanline == scanline && ppu.Cycle == dot) return;
+        ppu.Step();
+    }
+    throw new InvalidOperationException("PPU did not reach the requested dot.");
+}
+
+foreach (int dot in new[] { 0, 1, 2, 3, 4 })
+{
+    Nes nes = new(Cartridge.FromBytes(BuildNmiTimingRom()));
+    nes.Ppu.WriteRegister(0x2000, 0x80);
+    // The LDA's register read occurs after eleven PPU dots; its final dot
+    // follows the read and samples NMI. Sweep that read across vblank's edge.
+    AdvancePpuTo(nes.Ppu, 240, 330 + dot);
+    nes.StepInstruction();
+    Check($"vblank edge: status read at dot {dot}", (nes.Cpu.A & 0x80) == (dot >= 2 ? 0x80 : 0));
+    for (int i = 0; i < 20; i++) nes.StepInstruction();
+    Check($"vblank edge: NMI suppression at dot {dot}", nes.Bus.Read(0x10) == (dot is 0 or 4 ? 1 : 0));
+}
+
+foreach (bool enable in new[] { false, true })
+foreach (int writeDot in new[] { 338, 339 })
+{
+    Ppu2C02 ppu = NewPpu();
+    while (!ppu.FrameComplete) ppu.Step(); // the next frame is odd
+    ppu.WriteRegister(0x2001, enable ? (byte)0 : (byte)8);
+    AdvancePpuTo(ppu, -1, writeDot);
+    ppu.WriteRegister(0x2001, enable ? (byte)8 : (byte)0);
+    while (ppu.Scanline == -1 && ppu.Cycle < 339) ppu.Step();
+    // Save at the boundary as well: the render-enable latch must survive.
+    using MemoryStream state = new();
+    ppu.SaveState(new BinaryWriter(state));
+    Ppu2C02 restored = NewPpu();
+    state.Position = 0;
+    restored.LoadState(new BinaryReader(state));
+    ppu.Step();
+    restored.Step();
+    bool shouldSkip = writeDot == 338 ? enable : !enable;
+    Check($"odd frame: {(enable ? "enable" : "disable")} at dot {writeDot}", (ppu.Scanline == 0) == shouldSkip);
+    Check($"odd frame: latch round-trip at dot {writeDot}, enable={enable}", restored.Scanline == ppu.Scanline && restored.Cycle == ppu.Cycle);
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+    ppu.WriteRegister(0x2000, 0x80);
+    AdvancePpuTo(ppu, 241, 1);
+    ppu.ReadRegister(0x2002);
+    using MemoryStream state = new();
+    ppu.SaveState(new BinaryWriter(state));
+    Ppu2C02 restored = NewPpu();
+    state.Position = 0;
+    restored.LoadState(new BinaryReader(state));
+    restored.Step();
+    Check("vblank: suppression survives a save at the set boundary", !restored.NmiLine && (restored.ReadRegister(0x2002) & 0x80) == 0);
+}
+
+{
+    Nes nes = new(Cartridge.FromBytes(BuildNmiTimingRom()));
+    nes.Cpu.PC = 0xC003;
+    AdvancePpuTo(nes.Ppu, 241, 5);
+    nes.Ppu.WriteRegister(0x2000, 0x80);
+    for (int i = 0; i < 20; i++) nes.StepInstruction();
+    using MemoryStream state = new();
+    nes.SaveState(state);
+    for (int i = 0; i < 20; i++) nes.StepInstruction();
+    Check("NMI: held input generates only one interrupt", nes.Bus.Read(0x10) == 1);
+    state.Position = 0;
+    nes.LoadState(state);
+    for (int i = 0; i < 20; i++) nes.StepInstruction();
+    Check("NMI: loading a held input does not create a second edge", nes.Bus.Read(0x10) == 1);
+    nes.Ppu.WriteRegister(0x2000, 0);
+    nes.StepInstruction();
+    nes.Ppu.WriteRegister(0x2000, 0x80);
+    for (int i = 0; i < 20; i++) nes.StepInstruction();
+    Check("NMI: re-enabling after a sampled release creates another edge", nes.Bus.Read(0x10) == 2);
+}
+
+foreach ((string fixture, int expectedCount) in new[]
+{
+    ("v2-held-nmi.state.gz", 1), ("v2-pending-nmi.state.gz", 2),
+})
+{
+    using Stream resource = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream(fixture)!;
+    using System.IO.Compression.GZipStream compressed = new(resource, System.IO.Compression.CompressionMode.Decompress);
+    Nes nes = new(Cartridge.FromBytes(BuildNmiTimingRom()));
+    nes.LoadState(compressed);
+    for (int i = 0; i < 20; i++) nes.StepInstruction();
+    Check($"state: migrates {fixture}", nes.Bus.Read(0x10) == expectedCount && nes.Cpu.PC == 0xC003,
+        $"NMI count {nes.Bus.Read(0x10)}, PC {nes.Cpu.PC:X4}");
 }
 
 // ------------------------------------------------------------ drawing a frame

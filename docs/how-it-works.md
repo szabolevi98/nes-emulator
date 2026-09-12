@@ -42,7 +42,7 @@ A save state is everything that can change while a game runs — work RAM, the p
 
 That is still too much to keep once a frame, so rewind takes a snapshot every tenth frame and deflates it. A console's memory is mostly repeated bytes and long runs of zero, so they come down to around five kilobytes each: three hundred and sixty of them, a minute of play, costs under two megabytes. Holding backspace walks back through them.
 
-State format v2 carries the mapper number, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. This format includes the CPU interrupt samples and mapper address-edge state, and deliberately rejects older v1 state files; create a new save after upgrading.
+State format v3 carries the mapper number, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. It stores the CPU's sampled NMI input and the PPU's suppression and render-enable latches as well as the CPU interrupt samples and mapper address-edge state. Existing v2 saves are migrated when loaded, including an unconsumed PPU NMI event; v1 remains unsupported.
 
 ## Running it from a debugger
 

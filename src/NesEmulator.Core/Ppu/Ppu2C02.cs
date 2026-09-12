@@ -74,7 +74,8 @@ public sealed class Ppu2C02
     private bool _spriteZeroRendering;
 
     private bool _oddFrame;
-    private bool _nmiPending;
+    private bool _suppressVblank;
+    private bool _renderingAtPreviousDot;
 
     public Ppu2C02(IMapper mapper)
     {
@@ -109,22 +110,14 @@ public sealed class Ppu2C02
         Scanline = PreRenderScanline;
         Cycle = 0;
         _oddFrame = false;
-        _nmiPending = false;
+        _suppressVblank = false;
+        _renderingAtPreviousDot = false;
         _lineSpriteCount = 0;
         Array.Clear(FrameBuffer);
     }
 
-    /// <summary>True once, when the unit has just asked for a non-maskable interrupt.</summary>
-    public bool ConsumeNmi()
-    {
-        if (!_nmiPending)
-        {
-            return false;
-        }
-
-        _nmiPending = false;
-        return true;
-    }
+    /// <summary>Asserted while both the vblank flag and PPUCTRL's NMI enable are set.</summary>
+    public bool NmiLine => (_status & _ctrl & 0x80) != 0;
 
     private bool RenderingEnabled => (_mask & 0x18) != 0;
 
@@ -165,14 +158,15 @@ public sealed class Ppu2C02
         writer.Write(_spriteZeroOnLine);
         writer.Write(_spriteZeroRendering);
         writer.Write(_oddFrame);
-        writer.Write(_nmiPending);
+        writer.Write(_suppressVblank);
+        writer.Write(_renderingAtPreviousDot);
         writer.Write(Scanline);
         writer.Write(Cycle);
         writer.Write(FrameCount);
         writer.Write(FrameBuffer);
     }
 
-    internal void LoadState(BinaryReader reader)
+    internal bool LoadState(BinaryReader reader, bool legacy = false)
     {
         reader.ReadExactly(_vram);
         reader.ReadExactly(_paletteRam);
@@ -203,7 +197,9 @@ public sealed class Ppu2C02
         _spriteZeroOnLine = reader.ReadBoolean();
         _spriteZeroRendering = reader.ReadBoolean();
         _oddFrame = reader.ReadBoolean();
-        _nmiPending = reader.ReadBoolean();
+        bool savedNmi = reader.ReadBoolean();
+        _suppressVblank = !legacy && savedNmi;
+        _renderingAtPreviousDot = legacy ? RenderingEnabled : reader.ReadBoolean();
         Scanline = reader.ReadInt32();
         Cycle = reader.ReadInt32();
         FrameCount = reader.ReadInt64();
@@ -211,6 +207,7 @@ public sealed class Ppu2C02
         // The picture is part of the state so that loading mid-frame does not show
         // half of the old one and half of the new.
         reader.ReadExactly(FrameBuffer);
+        return legacy && savedNmi;
     }
 
     // ------------------------------------------------------ processor facing
@@ -222,6 +219,9 @@ public sealed class Ppu2C02
         {
             case 2:
             {
+                // Cycle names the next dot to execute. A read after dot 0 can
+                // suppress the vblank set on dot 1, as well as its NMI output.
+                if (Scanline == 241 && Cycle == 1) _suppressVblank = true;
                 // The unused low bits return whatever was last on the data bus.
                 byte value = (byte)((_status & 0xE0) | (_ioBus & 0x1F));
                 _status &= 0x7F;      // reading clears the vertical blank flag
@@ -265,15 +265,8 @@ public sealed class Ppu2C02
         {
             case 0:
             {
-                bool wasNmiEnabled = (_ctrl & 0x80) != 0;
                 _ctrl = value;
                 _t = (ushort)((_t & 0xF3FF) | ((value & 0x03) << 10));
-
-                // Enabling the interrupt while the flag is already up fires it at once.
-                if (!wasNmiEnabled && (_ctrl & 0x80) != 0 && (_status & 0x80) != 0)
-                {
-                    _nmiPending = true;
-                }
 
                 break;
             }
@@ -344,15 +337,10 @@ public sealed class Ppu2C02
         _clock++;
         if (Scanline is >= PreRenderScanline and < ScreenHeight)
         {
-            // On odd frames with rendering on, the pre-render line is one cycle short.
-            if (Scanline == PreRenderScanline && Cycle == 0 && _oddFrame && RenderingEnabled)
-            {
-                Cycle = 1;
-            }
-
             if (Scanline == PreRenderScanline && Cycle == 1)
             {
                 _status &= 0x1F; // clears vertical blank, sprite zero hit and overflow
+                _suppressVblank = false;
             }
 
             if (RenderingEnabled)
@@ -364,16 +352,25 @@ public sealed class Ppu2C02
 
         if (Scanline == ScreenHeight + 1 && Cycle == 1)
         {
-            _status |= 0x80;
-            if ((_ctrl & 0x80) != 0)
-            {
-                _nmiPending = true;
-            }
+            if (!_suppressVblank) _status |= 0x80;
         }
 
         if (Scanline >= 0 && Scanline < ScreenHeight && Cycle >= 1 && Cycle <= ScreenWidth)
         {
             FrameBuffer[(Scanline * ScreenWidth) + (Cycle - 1)] = ComposePixel();
+        }
+
+        // The odd-frame skip uses render enable from the preceding dot. Keep
+        // that latch separate from the beam jump: the 10-even_odd_timing ROM
+        // measures writes immediately on either side of this sampling boundary.
+        bool skipLastDot = Scanline == PreRenderScanline && Cycle == 339
+            && _oddFrame && _renderingAtPreviousDot;
+        _renderingAtPreviousDot = RenderingEnabled;
+        if (skipLastDot)
+        {
+            Cycle = 0;
+            Scanline = 0;
+            return;
         }
 
         Cycle++;

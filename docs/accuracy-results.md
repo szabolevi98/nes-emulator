@@ -22,7 +22,7 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | cpu_dummy_writes/cpu_dummy_writes_ppumem.nes | PASS | Passed | f59ac329f4872277ccbeff9dd595b901d861af8d53e8a43dcca93bb86752a6b3 |
 | cpu_interrupts_v2/rom_singles/1-cli_latency.nes | PASS | Passed | e402d36118f77dcbbe8ddca90c15fc76a46bcb30b25cb028c383e4a621de5fc0 |
 | cpu_interrupts_v2/rom_singles/2-nmi_and_brk.nes | FAIL (1) | NMI BRK 00 27 36 00 26 36 00 26 36 00 36 00 00 36 00 00 36 00 00 36 00 00 36 00 00 36 00 00 26 36 00 57FDBD98 2-nmi_and_brk Failed | 6e6bf6205930afcfebdc213c583df53986a688a8b36f8856b805ef4c1853e6eb |
-| cpu_interrupts_v2/rom_singles/3-nmi_and_irq.nes | FAIL (1) | NMI BRK 21 00 21 00 21 00 21 00 21 00 21 00 21 00 21 00 25 21 25 21 25 21 25 21 3D583190 3-nmi_and_irq Failed | 3008a9524d174a8aca562ff0361eba81da53e38cf1ebb5125322fe151f14d945 |
+| cpu_interrupts_v2/rom_singles/3-nmi_and_irq.nes | FAIL (1) | NMI BRK 23 00 21 00 21 00 21 00 21 00 21 00 21 00 21 00 21 00 25 21 25 21 25 21 09E3C14D 3-nmi_and_irq Failed | 3008a9524d174a8aca562ff0361eba81da53e38cf1ebb5125322fe151f14d945 |
 | cpu_interrupts_v2/rom_singles/4-irq_and_dma.nes | FAIL (1) | 0 +0 0 +1 0 +2 1 +3 1 +4 2 +5 2 +6 4 +7 4 +8 7 +9 7 +10 7 +11 7 +12 8 +13 ... 8 +524 8 +525 8 +526 8 +527 E309D62A 4-irq_and_dma Failed | 6d7b4c1947ada64679af56cf0c227286b2408afe1747dfaa4dc7363d57ff87f6 |
 | cpu_interrupts_v2/rom_singles/5-branch_delays_irq.nes | FAIL (1) | test_jmp T+ CK PC 00 05 03 01 04 03 02 05 04 03 04 04 04 05 07 05 05 07 06 04 07 07 05 08 08 04 08 09 05 08 B098C045 5-branch_delays_irq Failed | f9e10b4a24d8f3cd3e51fb7457c72858aab96a6467fdbbd806d0661c2d32fdc7 |
 | cpu_reset/ram_after_reset.nes | PASS | Passed | f1802a5618aaaa0c4d592caa45b0b13c54082af93fc311bda0c27bceacbc7c7f |
@@ -52,18 +52,18 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | mmc3_test_2/rom_singles/1-clocking.nes | PASS | Passed | b06d8a97f0ca672be92c841d6af7d1e650696e86e9cc0cf6eeb90d67a6ab499b |
 | mmc3_test_2/rom_singles/2-details.nes | PASS | Passed | e7af16c764b119e60effb7b1cfeec3dd8e2e657041283693cdbbeedb4081f1e3 |
 | mmc3_test_2/rom_singles/3-A12_clocking.nes | PASS | Passed | b375f15b9f9d372c8084b9c50928be9e41a3ac48be831ce82d203c18891433ad |
-| mmc3_test_2/rom_singles/4-scanline_timing.nes | FAIL (3) | Scanline 0 IRQ should occur sooner when $2000=$08 4-scanline_timing Failed #3 | 14a220b9d1272acc7a820ab38e9762a7cdf2d54c65e753be87f23dfcaf1bb845 |
+| mmc3_test_2/rom_singles/4-scanline_timing.nes | FAIL (12) | Scanline 239 IRQ should occur later when $2000=$10 4-scanline_timing Failed #12 | 14a220b9d1272acc7a820ab38e9762a7cdf2d54c65e753be87f23dfcaf1bb845 |
 | mmc3_test_2/rom_singles/5-MMC3.nes | PASS | Passed | e0824123d60b83868dac1189b28250f8e10376a01be468a5a74aa59937cb32ca |
 | mmc3_test_2/rom_singles/6-MMC3_alt.nes | FAIL (2) | IRQ shouldn't be set when reloading to 0 due to counter naturally reaching 0 previously 6-MMC3_alt Failed #2 | 56698b6918453d161a8d4e51f66e363d6966b054939c8176c53c401a6b55269b |
 | ppu_vbl_nmi/rom_singles/01-vbl_basics.nes | PASS | Passed | 06aea5af4edab4e3141c939cd5ac9936f8758203b25dcaf84ae1a09db49e024a |
-| ppu_vbl_nmi/rom_singles/02-vbl_set_time.nes | FAIL (1) | T+ 1 2 00 - V 01 - V 02 - V 03 - V 04 - V 05 V - 06 V - 07 V - 08 V - 4103C340 02-vbl_set_time Failed | dd98856130078844e3aa4bd95a9be8ab501ea84c089f1d8ad49a1b20af4b3a80 |
+| ppu_vbl_nmi/rom_singles/02-vbl_set_time.nes | PASS | Passed | dd98856130078844e3aa4bd95a9be8ab501ea84c089f1d8ad49a1b20af4b3a80 |
 | ppu_vbl_nmi/rom_singles/03-vbl_clear_time.nes | PASS | Passed | 787fdaa4dd6c5b6df5f4308fb6d55b57e2c2f69bd5ecdf8ad5c69735db4fcc72 |
 | ppu_vbl_nmi/rom_singles/04-nmi_control.nes | PASS | Passed | 84722c75b896c47c8642f83220230fe14f0a31e55e26ecb83c400e6a26d91b32 |
-| ppu_vbl_nmi/rom_singles/05-nmi_timing.nes | FAIL (1) | 00 4 01 4 02 4 03 4 04 3 05 3 06 3 07 3 08 3 09 3 ACB887C4 05-nmi_timing Failed | 72e515d689d7404ae5779b8c9c4c7b3563a755a94bd44864516f1b03df044482 |
-| ppu_vbl_nmi/rom_singles/06-suppression.nes | FAIL (1) | 00 - N 01 - N 02 - N 03 - N 04 - N 05 V N 06 V N 07 V N 08 V N 09 V N 3FE15516 06-suppression Failed | 811dd5997bbf48c2e5687ab06845f17ea76b2be472786596c334137582cc72aa |
-| ppu_vbl_nmi/rom_singles/07-nmi_on_timing.nes | FAIL (1) | 00 N 01 N 02 N 03 N 04 N 05 N 06 - 07 - 08 - 2B1F5269 07-nmi_on_timing Failed | 1ed154363660b5775b112ae63ce9bb4e400ebde2afef4d0ac12fc433efda3702 |
-| ppu_vbl_nmi/rom_singles/08-nmi_off_timing.nes | FAIL (1) | 03 - 04 - 05 N 06 N 07 N 08 N 09 N 0A N 0B N 0C N 4CC88927 08-nmi_off_timing Failed | 1d2a4093091c8e58a7f99d6a3531bbc6346b52cfc59bcb17ca04c1f2376cf2fc |
+| ppu_vbl_nmi/rom_singles/05-nmi_timing.nes | PASS | Passed | 72e515d689d7404ae5779b8c9c4c7b3563a755a94bd44864516f1b03df044482 |
+| ppu_vbl_nmi/rom_singles/06-suppression.nes | PASS | Passed | 811dd5997bbf48c2e5687ab06845f17ea76b2be472786596c334137582cc72aa |
+| ppu_vbl_nmi/rom_singles/07-nmi_on_timing.nes | PASS | Passed | 1ed154363660b5775b112ae63ce9bb4e400ebde2afef4d0ac12fc433efda3702 |
+| ppu_vbl_nmi/rom_singles/08-nmi_off_timing.nes | PASS | Passed | 1d2a4093091c8e58a7f99d6a3531bbc6346b52cfc59bcb17ca04c1f2376cf2fc |
 | ppu_vbl_nmi/rom_singles/09-even_odd_frames.nes | PASS | Passed | 1ac04283021ddd9294cc74ee709c55e20a350dc4815c15a8a93b3654837e858d |
-| ppu_vbl_nmi/rom_singles/10-even_odd_timing.nes | FAIL (2) | 09 Clock is skipped too soon, relative to enabling BG 10-even_odd_timing Failed #2 | 7217d2d172ce11ad45c4da40c2f22201cf0eb758bc2cd8dd39d2cf0a7d4ca83e |
+| ppu_vbl_nmi/rom_singles/10-even_odd_timing.nes | PASS | Passed | 7217d2d172ce11ad45c4da40c2f22201cf0eb758bc2cd8dd39d2cf0a7d4ca83e |
 
-38/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.
+44/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.
