@@ -15,3 +15,7 @@ their bytes.
 
 These fixtures ensure migration is checked against bytes produced by the old
 serializer, including held-line and unconsumed-event behavior.
+
+`v3-held-nmi.state.gz` was written by the core from commit `7f989e2` using the
+same held-line procedure. It checks that the CPU/PPU timing latches survive
+migration while the newly added APU reset delay defaults to zero.

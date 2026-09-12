@@ -16,14 +16,24 @@ Odd frames skip the final pre-render dot, with render enable latched on the prec
 
 References: [PPU frame timing](https://www.nesdev.org/wiki/PPU_frame_timing), [NMI operation](https://www.nesdev.org/wiki/NMI), and the pinned [test ROM sources](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/ppu_vbl_nmi/source). Other power-up clock alignments remain outside this milestone.
 
+## APU frame-counter timing
+
+The second milestone brings `apu_test` from 4/8 to **7/8**. Correcting the frame IRQ timing also makes `cpu_interrupts_v2/4-irq_and_dma` pass, so the complete suite reaches **48/55**, retaining every previous pass. This result covers OAM DMA and frame IRQ interaction; DMC bus arbitration remains a separate target.
+
+A `$4017` write updates the mode and IRQ-inhibit bits immediately, but resets the sequencer on the second GET cycle after the write: three CPU cycles after PUT, four after GET. The old sequence continues during that delay. In five-step mode the reset also clocks the quarter- and half-frame units. The four-step sequence lasts 29,830 CPU cycles and asserts its IRQ latch on three consecutive cycles; reading `$4015` between assertions clears the latch until the next assertion. The five-step sequence lasts 37,282 CPU cycles.
+
+The public `4-jitter`, `5-len_timing` and `6-irq_flag_timing` ROMs exercise both clock phases, all four length counters and consecutive IRQ assertions. Offline checks also cover replacement of a pending reset, two complete five-step sequences, and saving immediately before a delayed reset.
+
+References: [APU frame counter](https://www.nesdev.org/wiki/APU_Frame_Counter), [hardware confirmation of the 3/4-cycle write delay](https://forums.nesdev.org/viewtopic.php?t=26816), and the pinned [APU test sources](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/apu_test/source).
+
 ## Validation and save compatibility
 
-- 263 offline checks, including status/NMI reads across five adjacent dots, repeated NMI edges, odd-frame boundaries and real v2 state migration fixtures.
-- The complete public ROM report retains all 11 failures and their messages.
+- 284 offline checks, including status/NMI reads across five adjacent dots, repeated NMI edges, odd-frame boundaries, APU reset and IRQ boundaries, and real v2/v3 state migration fixtures.
+- The complete public ROM report retains all seven failures and their messages.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
-New saves use format v3 to preserve the new timing latches. Existing v2 saves remain loadable. Migration seeds the CPU's sampled NMI level from the restored PPU and transfers any old pending PPU event, avoiding a duplicate NMI from a held line or loss of an unconsumed event.
+New saves use format v4 to preserve the pending APU reset delay as well as the CPU/PPU timing latches introduced in v3. Existing v2 and v3 saves remain loadable, with no pending APU reset. For v2, migration seeds the CPU's sampled NMI level from the restored PPU and transfers any old pending PPU event, avoiding a duplicate NMI from a held line or loss of an unconsumed event.
 
 ```powershell
 dotnet run -c Release --project tests/NesEmulator.Tests
@@ -33,10 +43,9 @@ dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cp
 
 ## Next targets
 
-1. APU frame-counter write delay, quarter/half-frame clocks and IRQ edges.
-2. CPU NMI/BRK/IRQ overlap and branch interrupt polling.
-3. DMC prefetch and CPU/OAM DMA bus arbitration.
-4. MMC3 A12 fetch timing and an explicit MMC3A revision option.
-5. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
+1. CPU NMI/BRK/IRQ overlap and branch interrupt polling.
+2. DMC prefetch and CPU/OAM DMA bus arbitration.
+3. MMC3 A12 fetch timing and an explicit MMC3A revision option.
+4. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
 
 Each milestone should retain the previous passing checks and report its remaining mismatches. Sprite evaluation and DMA interactions need coverage beyond the present 55-ROM set.

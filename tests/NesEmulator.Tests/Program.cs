@@ -1000,6 +1000,7 @@ foreach (int writeDot in new[] { 338, 339 })
 foreach ((string fixture, int expectedCount) in new[]
 {
     ("v2-held-nmi.state.gz", 1), ("v2-pending-nmi.state.gz", 2),
+    ("v3-held-nmi.state.gz", 1),
 })
 {
     using Stream resource = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream(fixture)!;
@@ -1364,7 +1365,7 @@ foreach ((string fixture, int expectedCount) in new[]
     Apu2A03 apu = new();
     apu.WriteRegister(0x4017, 0x00); // four step mode, interrupt allowed
 
-    for (int i = 0; i < 29828; i++)
+    for (int i = 0; i < 29831; i++)
     {
         apu.Step();
     }
@@ -1378,6 +1379,96 @@ foreach ((string fixture, int expectedCount) in new[]
     Check("frame counter: the status register reports it", (status & 0x40) != 0,
         $"got {status:X2}");
     Check("frame counter: reading the status acknowledges it", !apu.IrqPending);
+    apu.Step();
+    Check("frame counter: second IRQ cycle reasserts after a read", (apu.ReadStatus() & 0x40) != 0);
+    apu.Step();
+    Check("frame counter: third IRQ cycle reasserts after a read", (apu.ReadStatus() & 0x40) != 0);
+    apu.Step();
+    Check("frame counter: IRQ stays clear after the third assertion", !apu.IrqPending);
+    for (int i = 0; i < 29826; i++) apu.Step();
+    Check("frame counter: the next IRQ sequence is not early", !apu.IrqPending);
+    apu.Step();
+    Check("frame counter: the four-step sequence repeats every 29830 cycles", apu.IrqPending);
+    apu.WriteRegister(0x4017, 0x40);
+    Check("frame counter: inhibit clears an asserted IRQ without waiting for reset", !apu.IrqPending);
+}
+
+foreach (int phase in new[] { 0, 1 })
+{
+    Apu2A03 apu = new();
+    if (phase != 0) apu.Step();
+    apu.WriteRegister(0x4015, 0x0F);
+    foreach (ushort address in new ushort[] { 0x4003, 0x4007, 0x400B, 0x400F })
+        apu.WriteRegister(address, 0x18); // length = 2 on all four channels
+    apu.WriteRegister(0x4017, 0x80);
+    int delay = phase == 0 ? 4 : 3;
+    for (int i = 0; i < delay - 1; i++) apu.Step();
+    Check($"frame counter: phase {phase} delays the five-step length clock",
+        apu.Pulse1.Length.Value == 2 && apu.Pulse2.Length.Value == 2 && apu.Triangle.Length.Value == 2 && apu.Noise.Length.Value == 2);
+    using MemoryStream state = new();
+    apu.SaveState(new BinaryWriter(state));
+    Apu2A03 restored = new();
+    state.Position = 0;
+    restored.LoadState(new BinaryReader(state));
+    apu.Step();
+    restored.Step();
+    Check($"frame counter: phase {phase} clocks all lengths after {delay} cycles",
+        apu.Pulse1.Length.Value == 1 && apu.Pulse2.Length.Value == 1 && apu.Triangle.Length.Value == 1 && apu.Noise.Length.Value == 1);
+    Check($"frame counter: phase {phase} restores a pending reset",
+        restored.Pulse1.Length.Value == 1 && restored.Triangle.Length.Value == 1);
+    for (int i = 0; i < 14912; i++) apu.Step();
+    Check($"frame counter: phase {phase} first periodic half clock is not early", (apu.ReadStatus() & 0x0F) == 0x0F);
+    apu.Step();
+    Check($"frame counter: phase {phase} first periodic half clock expires every channel", (apu.ReadStatus() & 0x0F) == 0);
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4015, 1);
+    apu.WriteRegister(0x4003, 0x08); // length = 254
+    apu.WriteRegister(0x4017, 0x80);
+    int[] halfClocks = [4, 14917, 37285, 52199, 74567];
+    int tick = 0;
+    byte length = 254;
+    bool matches = true;
+    foreach (int halfClock in halfClocks)
+    {
+        while (++tick < halfClock)
+        {
+            apu.Step();
+            matches &= apu.Pulse1.Length.Value == length;
+        }
+        apu.Step();
+        matches &= apu.Pulse1.Length.Value == --length;
+    }
+    Check("frame counter: five-step half clocks repeat across two full sequences", matches);
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4015, 1);
+    apu.WriteRegister(0x4003, 0x18);
+    apu.WriteRegister(0x4017, 0x80);
+    apu.Step();
+    apu.WriteRegister(0x4017, 0x00); // replaces a pending five-step reset
+    for (int i = 0; i < 4; i++) apu.Step();
+    Check("frame counter: a later four-step write cancels the pending five-step clock", apu.Pulse1.Length.Value == 2);
+}
+
+{
+    Nes nes = new(Cartridge.FromBytes(BuildNmiTimingRom()));
+    nes.Apu.WriteRegister(0x4015, 1);
+    nes.Apu.WriteRegister(0x4003, 0x18);
+    nes.Apu.WriteRegister(0x4017, 0x80);
+    nes.Apu.Step();
+    using MemoryStream state = new();
+    nes.SaveState(state);
+    for (int i = 0; i < 4; i++) nes.Apu.Step();
+    state.Position = 0;
+    nes.LoadState(state);
+    Check("state: pending APU reset does not clock during load", nes.Apu.Pulse1.Length.Value == 2);
+    for (int i = 0; i < 4; i++) nes.Apu.Step();
+    Check("state: pending APU reset resumes after console load", nes.Apu.Pulse1.Length.Value == 1);
 }
 
 {

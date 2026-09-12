@@ -13,18 +13,18 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | apu_test/rom_singles/1-len_ctr.nes | PASS | Passed | aacf86c1d773badd11392e54506a43a06a3dd0b67a4c255909d1daf770a4a1e2 |
 | apu_test/rom_singles/2-len_table.nes | PASS | Passed | c002ff1483b4dfb36a6eb004d49739cd58a2dff16e0bac167d5a7c12235caeeb |
 | apu_test/rom_singles/3-irq_flag.nes | PASS | Passed | dd888551665937391a2d691b1f96d1858316dbfce4951306146e9e396367f079 |
-| apu_test/rom_singles/4-jitter.nes | FAIL (2) | Frame irq is set too soon 4-jitter Failed #2 | bff573d72d0f134fe307f0bb8b968b8d2ffdb85e8aadad9c152839068d6db32a |
-| apu_test/rom_singles/5-len_timing.nes | FAIL (2) | Channel: 0 First length of mode 0 is too soon 5-len_timing Failed #2 | 4d88f8cc0b21303dc151af4d0f4169d79284634a73082d7ea1ae5cfafedd1e46 |
-| apu_test/rom_singles/6-irq_flag_timing.nes | FAIL (2) | Flag first set too soon 6-irq_flag_timing Failed #2 | fc1daff82dd1a49c7c1242392ffbf1c6f44fb70156868582117f2a844cc4dffd |
+| apu_test/rom_singles/4-jitter.nes | PASS | Passed | bff573d72d0f134fe307f0bb8b968b8d2ffdb85e8aadad9c152839068d6db32a |
+| apu_test/rom_singles/5-len_timing.nes | PASS | Passed | 4d88f8cc0b21303dc151af4d0f4169d79284634a73082d7ea1ae5cfafedd1e46 |
+| apu_test/rom_singles/6-irq_flag_timing.nes | PASS | Passed | fc1daff82dd1a49c7c1242392ffbf1c6f44fb70156868582117f2a844cc4dffd |
 | apu_test/rom_singles/7-dmc_basics.nes | FAIL (19) | There should be a one-byte buffer that's filled immediately if empty 7-dmc_basics Failed #19 | 547324867ee0ba2aa11401001d8d1288530aa4e0ecaaac1667ce79980a388ec1 |
 | apu_test/rom_singles/8-dmc_rates.nes | PASS | Passed | 5d9a79a505b37fa277cacc95a362f7e2a56e59ace7a698213d78432cc06a8867 |
 | cpu_dummy_writes/cpu_dummy_writes_oam.nes | PASS | Passed | 7c1d71a38b2e873d0874add8b823ff39b99151bb29f50096d8021787020c566c |
 | cpu_dummy_writes/cpu_dummy_writes_ppumem.nes | PASS | Passed | f59ac329f4872277ccbeff9dd595b901d861af8d53e8a43dcca93bb86752a6b3 |
 | cpu_interrupts_v2/rom_singles/1-cli_latency.nes | PASS | Passed | e402d36118f77dcbbe8ddca90c15fc76a46bcb30b25cb028c383e4a621de5fc0 |
 | cpu_interrupts_v2/rom_singles/2-nmi_and_brk.nes | FAIL (1) | NMI BRK 00 27 36 00 26 36 00 26 36 00 36 00 00 36 00 00 36 00 00 36 00 00 36 00 00 36 00 00 26 36 00 57FDBD98 2-nmi_and_brk Failed | 6e6bf6205930afcfebdc213c583df53986a688a8b36f8856b805ef4c1853e6eb |
-| cpu_interrupts_v2/rom_singles/3-nmi_and_irq.nes | FAIL (1) | NMI BRK 23 00 21 00 21 00 21 00 21 00 21 00 21 00 21 00 21 00 25 21 25 21 25 21 09E3C14D 3-nmi_and_irq Failed | 3008a9524d174a8aca562ff0361eba81da53e38cf1ebb5125322fe151f14d945 |
-| cpu_interrupts_v2/rom_singles/4-irq_and_dma.nes | FAIL (1) | 0 +0 0 +1 0 +2 1 +3 1 +4 2 +5 2 +6 4 +7 4 +8 7 +9 7 +10 7 +11 7 +12 8 +13 ... 8 +524 8 +525 8 +526 8 +527 E309D62A 4-irq_and_dma Failed | 6d7b4c1947ada64679af56cf0c227286b2408afe1747dfaa4dc7363d57ff87f6 |
-| cpu_interrupts_v2/rom_singles/5-branch_delays_irq.nes | FAIL (1) | test_jmp T+ CK PC 00 05 03 01 04 03 02 05 04 03 04 04 04 05 07 05 05 07 06 04 07 07 05 08 08 04 08 09 05 08 B098C045 5-branch_delays_irq Failed | f9e10b4a24d8f3cd3e51fb7457c72858aab96a6467fdbbd806d0661c2d32fdc7 |
+| cpu_interrupts_v2/rom_singles/3-nmi_and_irq.nes | FAIL (1) | NMI BRK 23 00 21 00 21 00 20 00 20 00 20 00 20 00 20 00 20 00 20 00 20 00 24 20 A13A6AB1 3-nmi_and_irq Failed | 3008a9524d174a8aca562ff0361eba81da53e38cf1ebb5125322fe151f14d945 |
+| cpu_interrupts_v2/rom_singles/4-irq_and_dma.nes | PASS | Passed | 6d7b4c1947ada64679af56cf0c227286b2408afe1747dfaa4dc7363d57ff87f6 |
+| cpu_interrupts_v2/rom_singles/5-branch_delays_irq.nes | FAIL (1) | test_jmp T+ CK PC 00 02 04 01 01 04 02 03 07 03 02 07 04 01 07 05 02 08 06 01 08 07 03 08 08 02 08 09 01 08 test_branch_not_taken T+ CK PC 00 02 04 01 01 04 02 02 06 03 01 06 04 02 07 05 01 07 06 04 0A 07 03 0A 08 02 0A 09 01 0A test_branch_taken_pagecross T+ CK PC 00 02 0D 01 01 0D 02 04 00 03 03 00 04 02 00 05 01 00 06 04 03 07 03 03 08 02 03 09 01 03 test_branch_taken T+ CK PC 00 02 04 01 01 04 02 03 07 03 02 07 04 01 07 05 04 0A 06 03 0A 07 02 0A 08 01 0A 09 03 0A CA0FBC6A 5-branch_delays_irq Failed | f9e10b4a24d8f3cd3e51fb7457c72858aab96a6467fdbbd806d0661c2d32fdc7 |
 | cpu_reset/ram_after_reset.nes | PASS | Passed | f1802a5618aaaa0c4d592caa45b0b13c54082af93fc311bda0c27bceacbc7c7f |
 | cpu_reset/registers.nes | PASS | Passed | a30f33fb6c9f56012fba38dc85ddc3dccc06bfc0b25fef7711b63f8207279715 |
 | instr_misc/rom_singles/01-abs_x_wrap.nes | PASS | Passed | 892e892b3b5d3526913b5491252f628d987baf44509dd28a7d109efc8a16bacc |
@@ -66,4 +66,4 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | ppu_vbl_nmi/rom_singles/09-even_odd_frames.nes | PASS | Passed | 1ac04283021ddd9294cc74ee709c55e20a350dc4815c15a8a93b3654837e858d |
 | ppu_vbl_nmi/rom_singles/10-even_odd_timing.nes | PASS | Passed | 7217d2d172ce11ad45c4da40c2f22201cf0eb758bc2cd8dd39d2cf0a7d4ca83e |
 
-44/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.
+48/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.

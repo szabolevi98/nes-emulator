@@ -40,6 +40,7 @@ public sealed class Apu2A03
 
     private long _cycle;
     private int _frameCounter;
+    private int _frameResetDelay;
     private bool _fiveStepMode;
     private bool _frameIrqDisabled;
     private bool _frameIrqPending;
@@ -75,6 +76,7 @@ public sealed class Apu2A03
     {
         _cycle = 0;
         _frameCounter = 0;
+        _frameResetDelay = 0;
         _frameIrqPending = false;
         _writeIndex = 0;
         _readIndex = 0;
@@ -150,14 +152,10 @@ public sealed class Apu2A03
                     _frameIrqPending = false;
                 }
 
-                _frameCounter = 0;
-
-                // Switching to five step mode clocks everything once immediately.
-                if (_fiveStepMode)
-                {
-                    ClockQuarterFrame();
-                    ClockHalfFrame();
-                }
+                // Control bits take effect now; the sequencer resets on the
+                // second GET cycle after the write (3 cycles after PUT, 4 after
+                // GET). A five-step write clocks the units at that reset too.
+                _frameResetDelay = (_cycle & 1) == 0 ? 4 : 3;
 
                 break;
         }
@@ -221,10 +219,26 @@ public sealed class Apu2A03
 
     private void StepFrameCounter()
     {
+        if (_frameResetDelay > 0 && --_frameResetDelay == 0)
+        {
+            _frameCounter = 0;
+            if (_fiveStepMode)
+            {
+                ClockQuarterFrame();
+                ClockHalfFrame();
+            }
+            return;
+        }
+
         _frameCounter++;
 
         if (!_fiveStepMode)
         {
+            // The IRQ latch is set on three successive CPU cycles. A status
+            // read clears it, but the next assertion can set it again.
+            if (_frameCounter >= Step4 - 1 && _frameCounter <= Step4 + 1 && !_frameIrqDisabled)
+                _frameIrqPending = true;
+
             switch (_frameCounter)
             {
                 case Step1:
@@ -240,11 +254,9 @@ public sealed class Apu2A03
                 case Step4:
                     ClockQuarterFrame();
                     ClockHalfFrame();
-                    if (!_frameIrqDisabled)
-                    {
-                        _frameIrqPending = true;
-                    }
+                    break;
 
+                case Step4 + 1:
                     _frameCounter = 0;
                     break;
             }
@@ -267,6 +279,9 @@ public sealed class Apu2A03
             case Step5:
                 ClockQuarterFrame();
                 ClockHalfFrame();
+                break;
+
+            case Step5 + 1:
                 _frameCounter = 0;
                 break;
         }
@@ -361,9 +376,10 @@ public sealed class Apu2A03
         writer.Write(_frameIrqDisabled);
         writer.Write(_frameIrqPending);
         writer.Write(_sampleCounter);
+        writer.Write(_frameResetDelay);
     }
 
-    internal void LoadState(BinaryReader reader)
+    internal void LoadState(BinaryReader reader, bool legacy = false)
     {
         Pulse1.LoadState(reader);
         Pulse2.LoadState(reader);
@@ -376,6 +392,7 @@ public sealed class Apu2A03
         _frameIrqDisabled = reader.ReadBoolean();
         _frameIrqPending = reader.ReadBoolean();
         _sampleCounter = reader.ReadDouble();
+        _frameResetDelay = legacy ? 0 : reader.ReadInt32();
 
         // Samples already queued belong to the moment that was left behind.
         DiscardSamples();

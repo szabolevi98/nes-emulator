@@ -69,7 +69,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E03; // "NES" and a format version
+    private const uint StateMagic = 0x53454E04; // "NES" and a format version
+    private const uint NmiStateMagic = 0x53454E03;
     private const uint LegacyStateMagic = 0x53454E02;
 
     /// <summary>
@@ -115,9 +116,10 @@ public sealed class Nes
 
         uint magic = reader.ReadUInt32();
         bool legacy = magic == LegacyStateMagic;
-        if (magic != StateMagic && !legacy)
+        bool legacyApu = magic != StateMagic;
+        if (magic != StateMagic && magic != NmiStateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. A v2 or v3 state is required.");
+            throw new InvalidDataException("Unsupported save state format. A v2, v3 or v4 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -135,21 +137,22 @@ public sealed class Nes
         int length = reader.ReadInt32();
         // v3 adds the CPU's sampled NMI line and the PPU's previous-dot render
         // latch. The old PPU pending-event byte becomes its suppression latch.
-        if (length != current.Length - (legacy ? 2 : 0))
+        // v4 also saves the pending APU frame-counter reset delay.
+        if (length != current.Length - (legacy ? 2 : 0) - (legacyApu ? 4 : 0))
             throw new InvalidDataException("The save state has an incompatible size.");
         byte[] checksum = reader.ReadBytes(32);
         byte[] data = reader.ReadBytes(length);
         if (data.Length != length || !checksum.AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(data)))
             throw new InvalidDataException("The save state is incomplete or damaged.");
 
-        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy);
+        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu);
     }
 
-    private void ReadStatePayload(BinaryReader reader, bool legacy)
+    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu)
     {
         Cpu.LoadState(reader, legacy);
         bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy);
-        Apu.LoadState(reader);
+        Apu.LoadState(reader, legacyApu);
         Bus.LoadState(reader);
         Mapper.LoadState(reader);
         Port1.LoadState(reader);
