@@ -5,7 +5,7 @@ namespace NesEmulator.Core.Apu;
 /// than synthesising it. The recording is stored as one bit per sample — each bit
 /// says whether the output level should step up or down by two — which fits a
 /// drum hit or a grunted word into very little cartridge space at the cost of
-/// sounding rough. The drums under the Super Mario Bros theme come from here.
+/// sounding rough.
 ///
 /// It reads straight out of cartridge memory while the game runs, which is why it
 /// takes the processor's bus with it.
@@ -91,7 +91,7 @@ public sealed class DmcChannel
             return;
         }
 
-        _timer = _timerPeriod;
+        _timer = _timerPeriod - 1;
 
         if (!_silence)
         {
@@ -126,16 +126,6 @@ public sealed class DmcChannel
         if (_bytesRemaining == 0)
         {
             _silence = true;
-
-            if (_loop)
-            {
-                Restart();
-            }
-            else if (_irqEnabled)
-            {
-                IrqPending = true;
-            }
-
             return;
         }
 
@@ -145,6 +135,14 @@ public sealed class DmcChannel
         // Sample memory is the top half of the address space and wraps within it.
         _currentAddress = _currentAddress == 0xFFFF ? (ushort)0x8000 : (ushort)(_currentAddress + 1);
         _bytesRemaining--;
+        // Finish the memory reader when its last byte is fetched. Waiting until
+        // the output requests another byte inserts eight silent bits per loop
+        // and can incorrectly restart a channel disabled through $4015.
+        if (_bytesRemaining == 0)
+        {
+            if (_loop) Restart();
+            else if (_irqEnabled) IrqPending = true;
+        }
     }
 
     public int Output() => OutputLevel;

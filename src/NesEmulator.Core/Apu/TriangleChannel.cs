@@ -54,9 +54,9 @@ public sealed class TriangleChannel
 
         _timer = _timerPeriod;
 
-        // Silence rather than crawl: a period this short is above hearing anyway,
-        // and stepping the sequence at that rate produces a click on every sample.
-        if (Length.Active && _linearCounter > 0 && _timerPeriod >= 2)
+        // Ultrasonic periods still clock the DAC; the output resampler removes
+        // those frequencies instead of freezing the waveform at an arbitrary level.
+        if (Length.Active && _linearCounter > 0)
         {
             _sequence = (_sequence + 1) & 31;
         }

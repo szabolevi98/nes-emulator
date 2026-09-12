@@ -1328,8 +1328,8 @@ Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
     Check("sound: nothing enabled produces a steady level", steady && taken > 0,
         $"took {taken}");
 
-    Check("sound: the mixer stays inside its range",
-        samples.Take(taken).All(s => s is >= 0f and <= 1f));
+    Check("sound: filtered PCM stays inside its signed range",
+        samples.Take(taken).All(s => s is >= -1f and <= 1f));
 }
 
 {
@@ -1390,6 +1390,112 @@ Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
     Check("console: the sound unit reaches the interrupt line",
         nes.Apu.IrqPending || nes.Cpu.PC != 0xC000,
         $"pc {nes.Cpu.PC:X4}");
+}
+
+// ------------------------------------------------------- audio regressions
+
+{
+    int[] periods = [4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068];
+    for (int rate = 0; rate < periods.Length; rate++)
+    {
+        Apu2A03 apu = new();
+        apu.WriteRegister(0x4015, 8);
+        apu.WriteRegister(0x400C, 0x3F);
+        apu.WriteRegister(0x400E, (byte)rate);
+        apu.WriteRegister(0x400F, 8);
+        int reference = 1;
+        bool matches = true;
+        for (int cycle = 0; cycle < periods[rate] * 40; cycle++)
+        {
+            // The published table specifies CPU cycles, including the zero tick.
+            if (cycle % periods[rate] == 0)
+                reference = (reference >> 1) | (((reference ^ (reference >> 1)) & 1) << 14);
+            apu.Step();
+            if (apu.Noise.Output() != ((reference & 1) == 0 ? 15 : 0)) matches = false;
+        }
+        Check($"noise: period {periods[rate]} uses the specified CPU clock", matches);
+    }
+}
+
+{
+    DmcChannel dmc = new() { ReadMemory = _ => 0xFF };
+    dmc.WriteControl(15);
+    dmc.WriteLength(1);
+    dmc.SetEnabled(true);
+    int previous = 0, first = -1, second = -1;
+    for (int cycle = 0; cycle < 1000 && second < 0; cycle++)
+    {
+        dmc.Clock();
+        if (dmc.Output() != previous)
+        {
+            if (first < 0) first = cycle;
+            else second = cycle;
+            previous = dmc.Output();
+        }
+    }
+    Check("DMC: fastest bit period is 54 CPU cycles, not 55", first >= 0 && second - first == 54);
+}
+
+{
+    int reads = 0;
+    DmcChannel dmc = new() { ReadMemory = _ => { reads++; return 0x55; } };
+    dmc.WriteControl(0x4F); // loop one byte; each bit alternates its output level
+    dmc.WriteLength(0);
+    dmc.SetEnabled(true);
+    dmc.Clock(); // load the first byte
+    bool continuous = true;
+    for (int bit = 0; bit < 32; bit++)
+    {
+        int before = dmc.Output();
+        for (int i = 0; i < 54; i++) dmc.Clock();
+        continuous &= dmc.Output() != before;
+    }
+    Check("DMC: looping samples have no extra silent byte", continuous);
+    dmc.SetEnabled(false);
+    for (int i = 0; i < 2000; i++) dmc.Clock();
+    int held = dmc.Output();
+    int stoppedReads = reads;
+    for (int i = 0; i < 2000; i++) dmc.Clock();
+    Check("DMC: disabling a looping sample stops fetching", !dmc.Active && dmc.Output() == held && reads == stoppedReads);
+}
+
+foreach (int sampleRate in new[] { 44100, 48000 })
+{
+    double ToneRms(double frequency)
+    {
+        AudioResampler output = new(sampleRate);
+        output.Reset(0.5f);
+        double phase = 0, squares = 0;
+        int count = 0;
+        for (int cycle = 0; cycle < (int)(Apu2A03.ClockRate / 5); cycle++)
+        {
+            output.Write((float)(0.5 + 0.25 * Math.Sin(2 * Math.PI * frequency * cycle / Apu2A03.ClockRate)));
+            phase += sampleRate;
+            if (phase < Apu2A03.ClockRate) continue;
+            phase -= Apu2A03.ClockRate;
+            float sample = output.Sample(phase / sampleRate);
+            // Ignore startup, then measure the output independently of its phase.
+            if (cycle > Apu2A03.ClockRate / 10) { squares += sample * sample; count++; }
+        }
+        return Math.Sqrt(squares / count);
+    }
+    double audible = ToneRms(1000);
+    double low = ToneRms(30);
+    double ultrasonic = ToneRms(sampleRate / 2.0 + 1000);
+    Check($"audio {sampleRate}: preserves the 1 kHz tone", audible is > 0.14 and < 0.18, $"RMS {audible:F6}");
+    Check($"audio {sampleRate}: NES high passes suppress sub-bass/DC", low < audible * 0.03, $"RMS {low:F6}");
+    Check($"audio {sampleRate}: ultrasonic input does not alias into audible sound",
+        ultrasonic < audible * 0.005, $"RMS {ultrasonic:F8}; rejection {20 * Math.Log10(ultrasonic / audible):F1} dB");
+
+    AudioResampler steady = new(sampleRate);
+    steady.Reset(0.4f);
+    float largest = 0;
+    for (int i = 0; i < 5000; i++)
+    {
+        steady.Write(0.4f);
+        largest = Math.Max(largest, Math.Abs(steady.Sample((i % 32) / 32.0)));
+    }
+    Check($"audio {sampleRate}: resetting to a held DAC level avoids a startup pop", largest < 0.00001f);
 }
 
 // ------------------------------------------------------------- save states

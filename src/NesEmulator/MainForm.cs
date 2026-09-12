@@ -546,7 +546,7 @@ public sealed class MainForm : Form, IMessageFilter
             return;
         }
 
-        while (_nes.Apu.AvailableSamples >= _audio.SamplesPerBuffer)
+        while (_audio.FreeBuffers > 0 && _nes.Apu.AvailableSamples >= _audio.SamplesPerBuffer)
         {
             int taken = _nes.Apu.ReadSamples(_audioBuffer, _audio.SamplesPerBuffer);
             if (!_audio.Submit(_audioBuffer, taken))

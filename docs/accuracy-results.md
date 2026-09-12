@@ -16,8 +16,8 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | apu_test/rom_singles/4-jitter.nes | FAIL (2) | Frame irq is set too soon 4-jitter Failed #2 | bff573d72d0f134fe307f0bb8b968b8d2ffdb85e8aadad9c152839068d6db32a |
 | apu_test/rom_singles/5-len_timing.nes | FAIL (2) | Channel: 0 First length of mode 0 is too soon 5-len_timing Failed #2 | 4d88f8cc0b21303dc151af4d0f4169d79284634a73082d7ea1ae5cfafedd1e46 |
 | apu_test/rom_singles/6-irq_flag_timing.nes | FAIL (2) | Flag first set too soon 6-irq_flag_timing Failed #2 | fc1daff82dd1a49c7c1242392ffbf1c6f44fb70156868582117f2a844cc4dffd |
-| apu_test/rom_singles/7-dmc_basics.nes | FAIL (16) | Clearing loop flag should end sample once it reaches end 7-dmc_basics Failed #16 | 547324867ee0ba2aa11401001d8d1288530aa4e0ecaaac1667ce79980a388ec1 |
-| apu_test/rom_singles/8-dmc_rates.nes | FAIL (3) | Rate 0's period is too long 8-dmc_rates Failed #3 | 5d9a79a505b37fa277cacc95a362f7e2a56e59ace7a698213d78432cc06a8867 |
+| apu_test/rom_singles/7-dmc_basics.nes | FAIL (19) | There should be a one-byte buffer that's filled immediately if empty 7-dmc_basics Failed #19 | 547324867ee0ba2aa11401001d8d1288530aa4e0ecaaac1667ce79980a388ec1 |
+| apu_test/rom_singles/8-dmc_rates.nes | PASS | Passed | 5d9a79a505b37fa277cacc95a362f7e2a56e59ace7a698213d78432cc06a8867 |
 | cpu_dummy_writes/cpu_dummy_writes_oam.nes | PASS | Passed | 7c1d71a38b2e873d0874add8b823ff39b99151bb29f50096d8021787020c566c |
 | cpu_dummy_writes/cpu_dummy_writes_ppumem.nes | PASS | Passed | f59ac329f4872277ccbeff9dd595b901d861af8d53e8a43dcca93bb86752a6b3 |
 | cpu_interrupts_v2/rom_singles/1-cli_latency.nes | PASS | Passed | e402d36118f77dcbbe8ddca90c15fc76a46bcb30b25cb028c383e4a621de5fc0 |
@@ -66,4 +66,4 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | ppu_vbl_nmi/rom_singles/09-even_odd_frames.nes | PASS | Passed | 1ac04283021ddd9294cc74ee709c55e20a350dc4815c15a8a93b3654837e858d |
 | ppu_vbl_nmi/rom_singles/10-even_odd_timing.nes | FAIL (2) | 09 Clock is skipped too soon, relative to enabling BG 10-even_odd_timing Failed #2 | 7217d2d172ce11ad45c4da40c2f22201cf0eb758bc2cd8dd39d2cf0a7d4ca83e |
 
-37/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.
+38/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.

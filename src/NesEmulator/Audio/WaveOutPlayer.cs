@@ -27,13 +27,6 @@ public sealed class WaveOutPlayer : IDisposable
     private IntPtr _device;
     private bool _disposed;
 
-    /// <summary>
-    /// Running estimate of the signal's own offset. The mixer output never goes
-    /// negative, so without removing it every sample would carry a constant push
-    /// against the speaker cone, audible as a thump when playback starts.
-    /// </summary>
-    private float _offset;
-
     public WaveOutPlayer(int sampleRate = 44100, int samplesPerBuffer = 735)
     {
         _samplesPerBuffer = samplesPerBuffer;
@@ -101,7 +94,7 @@ public sealed class WaveOutPlayer : IDisposable
     }
 
     /// <summary>
-    /// Queues one buffer's worth of samples, in the mixer's 0 to 1 range. Returns
+    /// Queues one buffer of signed, filtered PCM samples in the -1 to 1 range. Returns
     /// false when the card has nothing free, in which case the caller is ahead and
     /// should simply not produce more.
     /// </summary>
@@ -129,11 +122,7 @@ public sealed class WaveOutPlayer : IDisposable
         int length = Math.Min(count, _samplesPerBuffer);
         for (int i = 0; i < length; i++)
         {
-            // A very slow follower of the average, so it tracks the offset without
-            // touching anything in the audible band.
-            _offset += (samples[i] - _offset) * 0.0005f;
-            float centred = Math.Clamp(samples[i] - _offset, -1f, 1f);
-            _staging[i] = (short)(centred * 28000f);
+            _staging[i] = (short)(Math.Clamp(samples[i], -1f, 1f) * 28000f);
         }
 
         // A short last block would otherwise play the previous contents.

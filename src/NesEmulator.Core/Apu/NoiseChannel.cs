@@ -11,7 +11,7 @@ namespace NesEmulator.Core.Apu;
 /// </summary>
 public sealed class NoiseChannel
 {
-    /// <summary>Sixteen preset periods; the game picks one rather than a frequency.</summary>
+    /// <summary>Sixteen periods in CPU cycles; Clock itself runs at CPU/2.</summary>
     private static readonly int[] Periods =
     [
         4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068,
@@ -54,7 +54,7 @@ public sealed class NoiseChannel
             return;
         }
 
-        _timer = _timerPeriod;
+        _timer = _timerPeriod / 2 - 1;
 
         int tap = _shortMode ? (_shiftRegister >> 6) & 1 : (_shiftRegister >> 1) & 1;
         int feedback = (_shiftRegister & 1) ^ tap;

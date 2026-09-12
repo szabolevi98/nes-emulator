@@ -32,6 +32,7 @@ public sealed class Apu2A03
 
     private readonly float[] _samples;
     private readonly int _sampleRate;
+    private readonly AudioResampler _resampler;
 
     private int _writeIndex;
     private int _readIndex;
@@ -48,8 +49,11 @@ public sealed class Apu2A03
 
     public Apu2A03(int sampleRate = 44100)
     {
+        if (sampleRate is < 8000 or > 192000) throw new ArgumentOutOfRangeException(nameof(sampleRate));
         _sampleRate = sampleRate;
         _samples = new float[sampleRate]; // a second of slack is plenty
+        _resampler = new AudioResampler(sampleRate);
+        _resampler.Reset(Mix());
     }
 
     public PulseChannel Pulse1 { get; } = new(isFirstChannel: true);
@@ -77,9 +81,10 @@ public sealed class Apu2A03
         _bufferedCount = 0;
         _sampleCounter = 0;
         WriteRegister(0x4015, 0);
+        _resampler.Reset(Mix());
     }
 
-    /// <summary>Takes finished samples out of the ring, returning how many were copied.</summary>
+    /// <summary>Reads signed, filtered PCM samples, returning how many were copied.</summary>
     public int ReadSamples(float[] destination, int count)
     {
         int taken = Math.Min(count, _bufferedCount);
@@ -189,7 +194,7 @@ public sealed class Apu2A03
     /// <summary>Advances one processor cycle.</summary>
     public void Step()
     {
-        // The triangle runs at the full rate; everything else at half of it.
+        // Triangle and DMC timers use CPU-cycle units; pulse and noise use CPU/2.
         Triangle.Clock();
 
         if ((_cycle & 1) == 0)
@@ -205,11 +210,12 @@ public sealed class Apu2A03
 
         _cycle++;
 
+        _resampler.Write(Mix());
         _sampleCounter += _sampleRate;
         if (_sampleCounter >= ClockRate)
         {
             _sampleCounter -= ClockRate;
-            PushSample(Mix());
+            PushSample(_resampler.Sample(_sampleCounter / _sampleRate));
         }
     }
 
@@ -362,5 +368,6 @@ public sealed class Apu2A03
 
         // Samples already queued belong to the moment that was left behind.
         DiscardSamples();
+        _resampler.Reset(Mix());
     }
 }

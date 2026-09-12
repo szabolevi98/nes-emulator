@@ -79,7 +79,7 @@ PASS  sound: a second of cycles yields a second of samples
 PASS  state: replaying from a state is deterministic
 PASS  rewind: snapshots compress to a fraction of their size
 ...
-212/212 passed
+239/239 passed
 ```
 
 It covers the opcode table itself, every addressing mode including the zero page wraps, the signed overflow cases for addition and subtraction, branch and interrupt timing, the stack and return instructions, the undocumented opcodes, cartridge parsing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes and frame counter, the sprite memory transfer, the controllers, the save state round trip and the rewind ring — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out.
@@ -99,8 +99,8 @@ Measured on Windows x64 with .NET 9 on 2026-09-12. The [complete ROM report](doc
 | CPU interrupts v2 | 1 / 5 | CLI latency passes; NMI/BRK/IRQ, DMA and branch edge timing remain |
 | MMC3 test 2 | 4 / 6 | A12 clocking and counter behavior pass; scanline timing and alternate MMC3A behavior remain |
 | PPU vblank/NMI | 4 / 10 | Basic vblank, clear timing, NMI control and frame lengths pass; edge timing remains |
-| APU test | 3 / 8 | Length counters, length table and IRQ flag pass; frame sequencing and DMC timing remain |
-| **Public ROM total** | **37 / 55** | Failures are retained in the report, including the alternate MMC3 revision |
+| APU test | 4 / 8 | Length counters, length table, IRQ flag and DMC playback rates pass; frame sequencing and DMC buffering remain |
+| **Public ROM total** | **38 / 55** | Failures are retained in the report, including the alternate MMC3 revision |
 
 The CPU vectors come from [SingleStepTests/65x02](https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502). For the unstable `$8B` and `$AB` opcodes this emulator follows that suite's `$EE` mask. blargg's `$AB` checksum assumes a different result, so passing every vector does not imply passing that ROM. The reported discrepancy is intentional and is not hidden by skipping the opcode.
 
@@ -118,7 +118,7 @@ The independent bus-cycle vectors are an optional download of roughly 1 GB:
 dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cpu-vectors
 ```
 
-The normal 212-check suite runs offline and does not download anything. The ROM runner allows 3,600 emulated frames per ROM, handles the standard reset request, and can filter paths with a fourth argument after the report path. Downloaded test data stays out of version control.
+The normal 239-check suite runs offline and does not download anything. The ROM runner allows 3,600 emulated frames per ROM, handles the standard reset request, and can filter paths with a fourth argument after the report path. Downloaded test data stays out of version control.
 
 ## Trying it
 
@@ -192,6 +192,8 @@ That is still too much to keep once a frame, so rewind takes a snapshot every te
 State format v2 carries the mapper number, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. This format includes the new CPU interrupt samples and mapper address-edge state, and deliberately rejects older v1 state files; create a new save after upgrading.
 
 ## Known limits
+
+Audio uses band-limited resampling before converting the CPU-rate mixer to PCM, followed by the NES output filter approximation. Noise and DMC periods use their correct clock units, and looping DMC samples no longer insert a silent byte. See [audio implementation and validation](docs/audio-quality.md) for the checks and remaining limitations.
 
 Every CPU instruction cycle now performs a bus operation; cycle totals are no longer taken from the opcode table and padded at the end. `Step()` remains an instruction-level host API, with the other chips advancing at each bus access. Sprite DMA also performs its 256 reads and writes over 513 or 514 cycles, according to CPU parity.
 
