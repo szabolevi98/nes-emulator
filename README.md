@@ -191,6 +191,20 @@ That is still too much to keep once a frame, so rewind takes a snapshot every te
 
 State format v2 carries the mapper number, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. This format includes the new CPU interrupt samples and mapper address-edge state, and deliberately rejects older v1 state files; create a new save after upgrading.
 
+## Running it from a debugger
+
+The core is built optimised in every configuration, including Debug. It is a
+real-time simulation: 29,781 processor cycles and 733 band-limited audio samples
+have to be finished inside each 16.6 ms frame, and an unoptimised build manages
+roughly half of that. The emulator then runs at half speed and the sound card is
+left with nothing to play, which sounds like broken audio rather than like a slow
+machine. The app and test projects are still built unoptimised, so breakpoints
+and stepping in the user interface behave normally.
+
+The debugger panel reports an audio gap count beside the frame rate. Any number
+above zero after startup means the emulator is not feeding the sound card fast
+enough, which is a performance problem rather than a fault in the sound unit.
+
 ## Known limits
 
 Audio uses band-limited resampling before converting the CPU-rate mixer to PCM, followed by the NES output filter approximation. Noise and DMC periods use their correct clock units, and looping DMC samples no longer insert a silent byte. See [audio implementation and validation](docs/audio-quality.md) for the checks and remaining limitations.

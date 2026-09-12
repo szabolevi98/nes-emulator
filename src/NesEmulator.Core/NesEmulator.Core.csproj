@@ -15,6 +15,18 @@
     <Copyright>Copyright (c) 2026 szabolevi98</Copyright>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <!--
+      This project is a real-time simulation: it has to finish 29,781 processor
+      cycles and 733 filtered audio samples inside every 16.6 ms frame. Built
+      without optimisation it manages about half that, which starves the sound
+      card and makes a debug run sound broken rather than slow. Optimising it in
+      every configuration keeps Start Debugging usable; the app and test projects
+      are still built unoptimised, so breakpoints there behave normally.
+    -->
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="NesEmulator.Tests" />
   </ItemGroup>

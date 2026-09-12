@@ -87,6 +87,22 @@ public sealed class WaveOutPlayer : IDisposable
 
     public int SamplesPerBuffer => _samplesPerBuffer;
 
+    /// <summary>
+    /// How many times the card has been left with nothing queued. Every one of
+    /// these is a gap in the sound, so this is the number that says whether the
+    /// emulator is feeding the card fast enough.
+    /// </summary>
+    public long Underruns { get; private set; }
+
+    /// <summary>Checks for a dry queue. Call once per pass, before deciding what to do.</summary>
+    public void PollUnderrun()
+    {
+        if (FreeBuffers == BufferCount)
+        {
+            Underruns++;
+        }
+    }
+
     private bool IsQueued(int index)
     {
         WaveHdr header = Marshal.PtrToStructure<WaveHdr>(_headers[index]);

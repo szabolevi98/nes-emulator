@@ -418,6 +418,11 @@ public sealed class MainForm : Form, IMessageFilter
             return;
         }
 
+        // Every dry queue is a gap in the sound, so it is worth counting: it is
+        // the symptom of the emulator failing to keep up rather than of a bug in
+        // the sound unit itself.
+        _audio.PollUnderrun();
+
         // Two at most, so a long stall catches up gradually instead of lurching.
         int due = Math.Min(_audio.FreeBuffers, 2);
         for (int i = 0; i < due; i++)
@@ -633,6 +638,7 @@ public sealed class MainForm : Form, IMessageFilter
             $"PC:{cpu.PC:X4} A:{cpu.A:X2} X:{cpu.X:X2} Y:{cpu.Y:X2} " +
             $"P:{cpu.P:X2}[{Flags(cpu.P)}] SP:{cpu.S:X2}  " +
             $"line {_nes.Ppu.Scanline,4} dot {_nes.Ppu.Cycle,3}  {_fps:0.0} fps" +
+            (_audio is { Underruns: > 0 } ? $"  audio gaps {_audio.Underruns}" : string.Empty) +
             (cpu.Jammed ? "  — JAMMED"
                 : _rewinding ? $"  — rewinding, {_rewind?.Count ?? 0} left"
                 : _running ? string.Empty : "  — paused");
