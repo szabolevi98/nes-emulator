@@ -94,12 +94,22 @@ public sealed class WaveOutPlayer : IDisposable
     /// </summary>
     public long Underruns { get; private set; }
 
-    /// <summary>Checks for a dry queue. Call once per pass, before deciding what to do.</summary>
+    /// <summary>Whether anything has been queued since the last time the card ran dry.</summary>
+    private bool _playing;
+
+    /// <summary>
+    /// Checks for a dry queue. Call once per pass, before deciding what to do.
+    ///
+    /// An empty queue only counts once playback has actually started, so the idle
+    /// buffers before the first submission are not mistaken for a gap, and one
+    /// dry spell counts once rather than once per poll until sound resumes.
+    /// </summary>
     public void PollUnderrun()
     {
-        if (FreeBuffers == BufferCount)
+        if (_playing && FreeBuffers == BufferCount)
         {
             Underruns++;
+            _playing = false;
         }
     }
 
@@ -154,7 +164,13 @@ public sealed class WaveOutPlayer : IDisposable
         header.Flags = WhdrPrepared;
         Marshal.StructureToPtr(header, _headers[index], false);
 
-        return waveOutWrite(_device, _headers[index], Marshal.SizeOf<WaveHdr>()) == 0;
+        if (waveOutWrite(_device, _headers[index], Marshal.SizeOf<WaveHdr>()) != 0)
+        {
+            return false;
+        }
+
+        _playing = true;
+        return true;
     }
 
     public void Dispose()
