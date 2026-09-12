@@ -224,6 +224,9 @@ public sealed class MainForm : Form
         view.DropDownItems.Add(debuggerItem);
 
         ToolStripMenuItem help = new("&Help");
+        help.DropDownItems.Add(new ToolStripMenuItem("&Controls...", null, (_, _) =>
+            ShowHelpDialog(() => new ControlsForm(KeyMap, KeyMap2, MainMenuStrip!))));
+        help.DropDownItems.Add(new ToolStripSeparator());
         help.DropDownItems.Add(new ToolStripMenuItem("&About NES Emulator...", null, (_, _) => ShowAbout()));
 
         menu.Items.AddRange([file, emulation, view, help]);
@@ -257,7 +260,9 @@ public sealed class MainForm : Form
         }
     }
 
-    private void ShowAbout()
+    private void ShowAbout() => ShowHelpDialog(() => new AboutForm());
+
+    private void ShowHelpDialog(Func<Form> createDialog)
     {
         bool resume = _running;
         if (resume) Stop();
@@ -271,8 +276,8 @@ public sealed class MainForm : Form
 
         try
         {
-            using AboutForm about = new();
-            about.ShowDialog(this);
+            using Form dialog = createDialog();
+            dialog.ShowDialog(this);
         }
         finally
         {

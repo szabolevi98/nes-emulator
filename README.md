@@ -142,6 +142,8 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 
 The debugger panel folds out beside the screen and shows the register file, the beam position and the same instruction trace the processor was built against.
 
+**Help → Controls** shows both players' key bindings and the emulator shortcuts. Opening Controls or About pauses the game and restores its previous running state when the dialog closes.
+
 ## Release build
 
 The release artifact is a single self contained executable that runs without a .NET installation. The settings live in a publish profile, so Visual Studio and the command line produce the same file:
