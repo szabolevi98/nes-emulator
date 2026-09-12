@@ -1,6 +1,6 @@
 # NES Emulator
 
-A Nintendo Entertainment System emulator written in C#, built around a cycle counted 6502 core and a picture unit that follows the beam, verified against the hardware behaviour that games actually depend on.
+A Nintendo Entertainment System emulator written in C#, built around a cycle counted 6502 core, a picture unit that follows the beam and a sound unit with the real non-linear mixer, verified against the hardware behaviour that games actually depend on.
 
 ![demo.nes running](docs/demo.png)
 
@@ -8,20 +8,20 @@ The console is a small, completely documented machine, which makes it an unusual
 
 ## Where it is
 
-The processor and the picture unit both work, and a cartridge renders. Sound is not written yet.
+All three chips work, and a cartridge renders and plays.
 
 - [x] **6502 core** — all 151 documented instructions plus the undocumented opcodes, with per instruction cycle counts
 - [x] **Cycle accuracy** — page crossing penalties, branch penalties, and the double write that read-modify-write instructions perform
 - [x] **Interrupts** — reset, non-maskable and maskable, with the correct vectors, stack layout and break flag handling
 - [x] **Picture unit** — background and sprite rendering, scrolling, palettes, sprite zero hit, sprite overflow, edge clipping
+- [x] **Sound unit** — two square waves with sweep units, triangle, noise, sample playback, the frame counter and its interrupt, through the non-linear mixer
 - [x] **Sprite memory transfer** — the page copy through $4014, with the processor held still for it
 - [x] **Controllers** — both ports, as the serial shift registers they are
-- [x] **Cartridges** — iNES parsing, and mappers 0, 1, 2 and 3, which between them cover most of the library
+- [x] **Cartridges** — iNES parsing, and mappers 0, 1, 2, 3 and 4, which between them cover most of the library
 - [x] **Disassembler and execution trace**, in a debugger panel beside the screen
-- [ ] Sound unit: two pulse channels, triangle, noise, sample playback
-- [ ] Mapper 4, the MMC3, with its scanline counter
 - [ ] Save states and rewind
 - [ ] A per-cycle processor and picture unit interleave
+- [ ] Second controller mapped to the keyboard
 
 ## The parts that are easy to get wrong
 
@@ -43,6 +43,16 @@ So the renderer follows the beam rather than walking tiles. Its scroll position 
 
 Two kilobytes of name table memory has to cover four screens, so the cartridge wires the same memory into two of the four slots. Which two is what mirroring means, and it is why the demo above scrolls sideways forever across a single screen of tiles.
 
+## Why the sound is not a sum
+
+Five channels — two square waves, a triangle, a noise generator and a sample player — feed a resistor ladder rather than an adder. The result is not linear: a loud channel compresses the others, so the same note is quieter in a busy passage than in a bare one. Adding the channels together instead is the usual reason an emulator sounds harsh and thin, so the mixer here uses the published approximations of that ladder.
+
+The rest of the chip divides cleanly in two. The channel timers run off the processor clock and produce the waveform; a separate frame counter ticks four or five times a frame and clocks the parts that shape a note over time — the volume envelopes, the pitch sweeps and the length counters that keep a sound playing after the game has moved on. That counter is also the only interrupt a game can get without a cartridge that provides its own.
+
+Two details carry more of the console's character than their size suggests. The triangle steps through a fixed thirty-two step staircase with no volume control at all, which is where that hollow bass tone comes from. And the noise channel is a shift register feeding back on itself; flipping one bit changes which bit it taps, shortening the cycle from 32,767 steps to 93 — short enough to hear as a pitch, which is how the same channel gives both hissing static and metallic engine sounds.
+
+Playback goes out through the Windows wave API, and the number of buffers the sound card has finished with is what paces the emulator. Timing the frames off a clock instead would drift against the card and break the audio up.
+
 ## Tests
 
 The suite is a dependency free console runner that prints one line per check, matching the style used across these projects:
@@ -59,11 +69,14 @@ PASS  ppu: $3F10 and $3F00 are the same byte
 PASS  ppu: a frame is 89,342 cycles
 PASS  render: the tile is drawn in its palette colour
 PASS  render: the leftmost squares are clipped away
+PASS  mmc3: the interrupt arrives on the counted line
+PASS  frame counter: interrupts at the end of the sequence
+PASS  sound: a second of cycles yields a second of samples
 ...
-114/114 passed
+154/154 passed
 ```
 
-It covers the opcode table itself, every addressing mode including the zero page wraps, the signed overflow cases for addition and subtraction, branch and interrupt timing, the stack and return instructions, the undocumented opcodes, cartridge parsing, all four mappers, the picture unit registers and mirroring, the sprite memory transfer, the controllers — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out.
+It covers the opcode table itself, every addressing mode including the zero page wraps, the signed overflow cases for addition and subtraction, branch and interrupt timing, the stack and return instructions, the undocumented opcodes, cartridge parsing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes and frame counter, the sprite memory transfer, the controllers — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out.
 
 The published accuracy test ROMs are the next measure, and their results table belongs in this README once they run.
 
@@ -74,7 +87,7 @@ dotnet build NesEmulator.sln
 dotnet run --project src/NesEmulator
 ```
 
-Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/demo.nes` is included and is what the picture above shows: a handwritten cartridge that fills a screen with tiles and scrolls it, driven by the frame interrupt. `tools/make-demo-rom.sh` builds it, with the full source listed in its comments.
+Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/demo.nes` is included and is what the picture above shows: a handwritten cartridge that fills a screen with tiles, scrolls it from the frame interrupt, and sweeps a square wave in step with the scroll so there is something to hear as well. `tools/make-demo-rom.sh` builds it, with the full source listed in its comments.
 
 | | |
 |---|---|
@@ -83,6 +96,7 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 | Start / Select | Enter / Shift |
 | Pause | F5 |
 | Reset | Ctrl+R |
+| Sound | Emulation menu |
 | Debugger | F12 |
 
 The debugger panel folds out beside the screen and shows the register file, the beam position and the same instruction trace the processor was built against.
@@ -106,10 +120,11 @@ NesEmulator.exe roms\demo.nes
 - `src/NesEmulator.Core/` — the console itself, with no user interface dependencies, so the tests can run it headless
   - `Cpu/` — the opcode table, the processor and the disassembler
   - `Ppu/` — the picture unit and the colour table
+  - `Apu/` — the sound unit and its five channels
   - `Cartridges/` — iNES parsing and the mappers
   - `Memory/` — the processor address space
   - `Input/` — the controllers
-- `src/NesEmulator/` — the Windows Forms shell
+- `src/NesEmulator/` — the Windows Forms shell and the wave output
 - `tests/NesEmulator.Tests/` — the console test runner
 - `tools/` — the demo cartridge generator
 

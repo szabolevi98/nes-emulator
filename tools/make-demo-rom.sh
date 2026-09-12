@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Builds roms/demo.nes, a handwritten cartridge that exercises the parts of the
-# picture unit worth seeing: a palette, a screen full of tiles, and a scroll that
-# moves every frame because the interrupt handler rewrites it.
+# Builds roms/demo.nes, a handwritten cartridge that exercises the parts worth
+# seeing: a palette, a screen full of tiles, a scroll that moves every frame
+# because the interrupt handler rewrites it, and a note whose pitch follows the
+# same counter, so the picture and the sound stay in step.
 #
 # Mapper 0, 16 KB of program ROM mapped at $C000, 8 KB of tile ROM.
 # Run it from the repository root: bash tools/make-demo-rom.sh
@@ -48,26 +49,40 @@
 #   C049  D0 F1      BNE $C03C
 #   C04B  88         DEY
 #   C04C  D0 EC      BNE $C03A
-#   ---- go -------------------------------------------------------------------
+#   ---- picture on -----------------------------------------------------------
 #   C04E  A9 00      LDA #$00
 #   C050  8D 05 20   STA $2005          ; scroll to the origin
 #   C053  8D 05 20   STA $2005
 #   C056  A9 1E      LDA #$1E           ; show everything, including the edges
 #   C058  8D 01 20   STA $2001
-#   C05B  A9 80      LDA #$80
-#   C05D  8D 00 20   STA $2000          ; ask for an interrupt each frame
-#   C060  4C 60 C0   JMP $C060          ; the handler does the rest
+#   ---- sound on -------------------------------------------------------------
+#   C05B  A9 01      LDA #$01
+#   C05D  8D 15 40   STA $4015          ; enable the first square wave
+#   C060  A9 BF      LDA #$BF           ; half duty, length halted, volume 15
+#   C062  8D 00 40   STA $4000
+#   C065  A9 08      LDA #$08
+#   C067  8D 01 40   STA $4001          ; sweep unit off
+#   C06A  A9 00      LDA #$00
+#   C06C  8D 02 40   STA $4002          ; timer low
+#   C06F  A9 08      LDA #$08
+#   C071  8D 03 40   STA $4003          ; timer high, and start the note
+#   C074  A9 80      LDA #$80
+#   C076  8D 00 20   STA $2000          ; ask for an interrupt each frame
+#   C079  4C 79 C0   JMP $C079          ; the handler does the rest
 #   ---- interrupt ------------------------------------------------------------
-#   C070  48         PHA
-#   C071  AD 02 20   LDA $2002          ; clears the flag and the write latch
-#   C074  EE 00 00   INC $0000
-#   C077  AD 00 00   LDA $0000
-#   C07A  8D 05 20   STA $2005          ; scroll one pixel further across
-#   C07D  A9 00      LDA #$00
-#   C07F  8D 05 20   STA $2005
-#   C082  68         PLA
-#   C083  40         RTI
-#   C090  40         RTI                ; for the maskable interrupt vector
+#   C0C0  48         PHA
+#   C0C1  AD 02 20   LDA $2002          ; clears the flag and the write latch
+#   C0C4  EE 00 00   INC $0000
+#   C0C7  AD 00 00   LDA $0000
+#   C0CA  8D 05 20   STA $2005          ; scroll one pixel further across
+#   C0CD  A9 00      LDA #$00
+#   C0CF  8D 05 20   STA $2005
+#   C0D2  AD 00 00   LDA $0000
+#   C0D5  09 40      ORA #$40           ; keep the period inside a musical range
+#   C0D7  8D 02 40   STA $4002          ; and the pitch follows the scroll
+#   C0DA  68         PLA
+#   C0DB  40         RTI
+#   C0E0  40         RTI                ; for the maskable interrupt vector
 set -euo pipefail
 
 out="roms/demo.nes"
@@ -91,11 +106,15 @@ put $((prg + 0x0000)) "\
 20 a2 00 bd a0 c0 8d 07 20 e8 e0 20 d0 f5 a9 20 \
 8d 06 20 a9 00 8d 06 20 a0 04 a2 00 8a 4a 4a 4a \
 29 07 18 69 01 8d 07 20 e8 d0 f1 88 d0 ec a9 00 \
-8d 05 20 8d 05 20 a9 1e 8d 01 20 a9 80 8d 00 20 \
-4c 60 c0"
+8d 05 20 8d 05 20 a9 1e 8d 01 20 a9 01 8d 15 40 \
+a9 bf 8d 00 40 a9 08 8d 01 40 a9 00 8d 02 40 a9 \
+08 8d 03 40 a9 80 8d 00 20 4c 79 c0"
 
-put $((prg + 0x0070)) "48 ad 02 20 ee 00 00 ad 00 00 8d 05 20 a9 00 8d 05 20 68 40"
-put $((prg + 0x0090)) "40"
+put $((prg + 0x00C0)) "\
+48 ad 02 20 ee 00 00 ad 00 00 8d 05 20 a9 00 8d \
+05 20 ad 00 00 09 40 8d 02 40 68 40"
+
+put $((prg + 0x00E0)) "40"
 
 # Four background palettes, then the same four for sprites. Entry zero of each is
 # the shared backdrop.
@@ -103,9 +122,9 @@ put $((prg + 0x00A0)) "\
 0f 16 27 18 0f 11 21 31 0f 19 29 39 0f 14 24 34 \
 0f 16 27 18 0f 11 21 31 0f 19 29 39 0f 14 24 34"
 
-put $((prg + 0x3FFA)) "70 c0"   # interrupt
+put $((prg + 0x3FFA)) "c0 c0"   # interrupt
 put $((prg + 0x3FFC)) "00 c0"   # reset
-put $((prg + 0x3FFE)) "90 c0"   # maskable interrupt
+put $((prg + 0x3FFE)) "e0 c0"   # maskable interrupt
 
 # Tiles 1 to 8: a six by six block inset in each eight by eight square, so the
 # screen reads as a grid. Each tile uses one of the three colours of its palette,

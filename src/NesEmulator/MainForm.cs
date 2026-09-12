@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using NesEmulator.Audio;
 using NesEmulator.Controls;
 using NesEmulator.Core;
 using NesEmulator.Core.Cpu;
@@ -41,6 +42,9 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _clock;
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private readonly ToolStripMenuItem _pauseItem;
+    private readonly ToolStripMenuItem _soundItem;
+    private readonly float[] _audioBuffer = new float[4096];
+    private WaveOutPlayer? _audio;
 
     private Nes? _nes;
     private bool _running;
@@ -138,12 +142,36 @@ public sealed class MainForm : Form
             Enabled = false,
         };
 
+        // A machine with no output device is not an error worth stopping for; the
+        // emulator simply runs silently and the menu entry stays off.
+        try
+        {
+            _audio = new WaveOutPlayer();
+        }
+        catch (InvalidOperationException)
+        {
+            _audio = null;
+        }
+
+        _soundItem = new ToolStripMenuItem("&Sound", null, (sender, _) =>
+        {
+            ToolStripMenuItem item = (ToolStripMenuItem)sender!;
+            item.Checked = !item.Checked;
+            _nes?.Apu.DiscardSamples();
+        })
+        {
+            Checked = _audio is not null,
+            Enabled = _audio is not null,
+        };
+
         ToolStripMenuItem emulation = new("&Emulation");
         emulation.DropDownItems.Add(_pauseItem);
         emulation.DropDownItems.Add(new ToolStripMenuItem("&Reset", null, (_, _) => ResetConsole())
         {
             ShortcutKeys = Keys.Control | Keys.R,
         });
+        emulation.DropDownItems.Add(new ToolStripSeparator());
+        emulation.DropDownItems.Add(_soundItem);
 
         ToolStripMenuItem view = new("&View");
         ToolStripMenuItem debuggerItem = new("&Debugger", null, (sender, _) =>
@@ -179,10 +207,10 @@ public sealed class MainForm : Form
             }
         };
 
-        // A sixtieth of a second is the closest a form timer gets to the real
-        // 60.1 frames a second; the measured rate is shown in the status line.
-        _clock = new System.Windows.Forms.Timer { Interval = 16 };
-        _clock.Tick += (_, _) => RunOneFrame();
+        // The timer only asks how much work is due; the sound card decides how
+        // much that is. See OnClockTick.
+        _clock = new System.Windows.Forms.Timer { Interval = 8 };
+        _clock.Tick += (_, _) => OnClockTick();
 
         if (romPath is not null && File.Exists(romPath))
         {
@@ -287,6 +315,33 @@ public sealed class MainForm : Form
         RefreshState();
     }
 
+    /// <summary>
+    /// Decides how many frames are due. With sound on, that is however many
+    /// buffers the card has finished with, so the emulator runs at the speed the
+    /// audio is being consumed and never drifts away from it. With sound off
+    /// there is nothing to pace against, so it falls back to one frame a tick.
+    /// </summary>
+    private void OnClockTick()
+    {
+        if (_nes is null)
+        {
+            return;
+        }
+
+        if (_audio is null || !_soundItem.Checked)
+        {
+            RunOneFrame();
+            return;
+        }
+
+        // Two at most, so a long stall catches up gradually instead of lurching.
+        int due = Math.Min(_audio.FreeBuffers, 2);
+        for (int i = 0; i < due; i++)
+        {
+            RunOneFrame();
+        }
+    }
+
     private void RunOneFrame()
     {
         if (_nes is null)
@@ -296,6 +351,7 @@ public sealed class MainForm : Form
 
         _nes.RunFrame();
         _screen.Present(_nes.Ppu.FrameBuffer);
+        PlayAudio();
 
         _framesSinceCount++;
         double now = _stopwatch.Elapsed.TotalSeconds;
@@ -309,6 +365,31 @@ public sealed class MainForm : Form
         if (_debugger.Visible)
         {
             RefreshState();
+        }
+    }
+
+    private void PlayAudio()
+    {
+        if (_nes is null || _audio is null)
+        {
+            return;
+        }
+
+        if (!_soundItem.Checked)
+        {
+            // Keep the ring from filling up while muted, so unmuting does not play
+            // a second of stale sound.
+            _nes.Apu.DiscardSamples();
+            return;
+        }
+
+        while (_nes.Apu.AvailableSamples >= _audio.SamplesPerBuffer)
+        {
+            int taken = _nes.Apu.ReadSamples(_audioBuffer, _audio.SamplesPerBuffer);
+            if (!_audio.Submit(_audioBuffer, taken))
+            {
+                break; // nothing free; the rest stays buffered for the next frame
+            }
         }
     }
 
@@ -397,6 +478,7 @@ public sealed class MainForm : Form
         if (disposing)
         {
             _clock.Dispose();
+            _audio?.Dispose();
         }
 
         base.Dispose(disposing);
