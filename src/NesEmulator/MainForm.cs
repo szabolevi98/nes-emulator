@@ -223,7 +223,10 @@ public sealed class MainForm : Form
 
         view.DropDownItems.Add(debuggerItem);
 
-        menu.Items.AddRange([file, emulation, view]);
+        ToolStripMenuItem help = new("&Help");
+        help.DropDownItems.Add(new ToolStripMenuItem("&About NES Emulator...", null, (_, _) => ShowAbout()));
+
+        menu.Items.AddRange([file, emulation, view, help]);
 
         Controls.Add(_screen);
         Controls.Add(_debugger);
@@ -251,6 +254,29 @@ public sealed class MainForm : Form
         if (romPath is not null && File.Exists(romPath))
         {
             LoadRom(romPath);
+        }
+    }
+
+    private void ShowAbout()
+    {
+        bool resume = _running;
+        if (resume) Stop();
+        _rewinding = false;
+        _rewindTicks = 0;
+        if (_nes is not null)
+        {
+            _nes.Port1.Buttons = 0;
+            _nes.Port2.Buttons = 0;
+        }
+
+        try
+        {
+            using AboutForm about = new();
+            about.ShowDialog(this);
+        }
+        finally
+        {
+            if (resume && !IsDisposed) Start();
         }
     }
 
