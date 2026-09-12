@@ -2,6 +2,7 @@ using NesEmulator.Core.Apu;
 using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Input;
 using NesEmulator.Core.Ppu;
+using NesEmulator.Core.Cpu;
 
 namespace NesEmulator.Core.Memory;
 
@@ -41,16 +42,26 @@ public sealed class NesBus(
     private byte _openBus;
 
     /// <summary>
-    /// Cycles the processor is held still for while sprite memory is being filled.
-    /// The transfer uses the same bus, so the processor simply cannot run.
+    /// Page latched by OAM DMA, or -1 when no transfer is pending. An RMW write
+    /// can replace this page before the processor reaches the next read cycle.
     /// </summary>
-    public int PendingDmaCycles { get; private set; }
+    private int _dmaPage = -1;
 
-    public int TakeDmaCycles()
+    public int RunDma(Cpu6502 cpu)
     {
-        int cycles = PendingDmaCycles;
-        PendingDmaCycles = 0;
-        return cycles;
+        if (_dmaPage < 0) return 0;
+        int page = _dmaPage;
+        _dmaPage = -1;
+        long start = cpu.Cycles;
+        bool align = (start & 1) != 0;
+        cpu.DmaRead(cpu.PC); // halt cycle
+        if (align) cpu.DmaRead(cpu.PC);
+        for (int i = 0; i < 256; i++)
+        {
+            byte value = cpu.DmaRead((ushort)((page << 8) | i));
+            cpu.DmaWrite(0x2004, value);
+        }
+        return (int)(cpu.Cycles - start);
     }
 
     public byte Read(ushort address)
@@ -104,7 +115,7 @@ public sealed class NesBus(
         }
         else if (address == 0x4014)
         {
-            TransferSprites(value);
+            _dmaPage = value;
         }
         else if (address == 0x4016)
         {
@@ -119,24 +130,6 @@ public sealed class NesBus(
         {
             _mapper.CpuWrite(address, value);
         }
-    }
-
-    /// <summary>
-    /// Copies a whole page of work RAM into sprite memory. Writing the page number
-    /// to $4014 is all a game does; the hardware performs 256 reads and 256 writes
-    /// and the processor stands still for every one of them.
-    /// </summary>
-    private void TransferSprites(byte page)
-    {
-        ushort source = (ushort)(page << 8);
-        for (int i = 0; i < 256; i++)
-        {
-            // Routed through the register so that it starts wherever the sprite
-            // memory address happens to point, exactly as the hardware does.
-            _ppu.WriteRegister(0x2004, Read((ushort)(source + i)));
-        }
-
-        PendingDmaCycles += 513;
     }
 
     /// <summary>Reads without disturbing anything, for the trace and debugger views.</summary>
@@ -159,13 +152,13 @@ public sealed class NesBus(
     {
         writer.Write(_ram);
         writer.Write(_openBus);
-        writer.Write(PendingDmaCycles);
+        writer.Write(_dmaPage);
     }
 
     internal void LoadState(BinaryReader reader)
     {
         reader.ReadExactly(_ram);
         _openBus = reader.ReadByte();
-        PendingDmaCycles = reader.ReadInt32();
+        _dmaPage = reader.ReadInt32();
     }
 }

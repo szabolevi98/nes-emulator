@@ -12,10 +12,8 @@ namespace NesEmulator.Core.Cartridges.Mappers;
 /// picture. That is what a split screen status bar is really made of, and it is
 /// far steadier than watching the sprite zero hit flag.
 ///
-/// The line counter is clocked here once per visible line. On hardware it
-/// actually watches one address line of the picture unit rise as the fetch
-/// pattern moves between tile memory halves, which can fire at other moments too;
-/// per line is the usual simplification and holds for ordinary rendering.
+/// The counter watches rising edges on PPU A12, filtered by the preceding low
+/// period. CPU accesses to PPUADDR and PPUDATA can clock it as well as rendering.
 /// </summary>
 public sealed class Mmc3 : IMapper
 {
@@ -35,6 +33,8 @@ public sealed class Mmc3 : IMapper
     private bool _irqReload;
     private bool _irqEnabled;
     private bool _irqPending;
+    private bool _a12High;
+    private long _a12LowSince;
 
     public Mmc3(Cartridge cartridge)
     {
@@ -147,6 +147,14 @@ public sealed class Mmc3 : IMapper
         }
     }
 
+    public void OnPpuAddress(ushort address, long cycle)
+    {
+        bool high = (address & 0x1000) != 0;
+        if (!high && _a12High) _a12LowSince = cycle;
+        if (high && !_a12High && cycle - _a12LowSince >= 8) OnScanline();
+        _a12High = high;
+    }
+
     private int PrgOffset(ushort address)
     {
         int slot = (address - 0x8000) / PrgSlotSize;
@@ -214,6 +222,8 @@ public sealed class Mmc3 : IMapper
         writer.Write(_irqReload);
         writer.Write(_irqEnabled);
         writer.Write(_irqPending);
+        writer.Write(_a12High);
+        writer.Write(_a12LowSince);
     }
 
     public void LoadState(BinaryReader reader)
@@ -227,5 +237,7 @@ public sealed class Mmc3 : IMapper
         _irqReload = reader.ReadBoolean();
         _irqEnabled = reader.ReadBoolean();
         _irqPending = reader.ReadBoolean();
+        _a12High = reader.ReadBoolean();
+        _a12LowSince = reader.ReadInt64();
     }
 }

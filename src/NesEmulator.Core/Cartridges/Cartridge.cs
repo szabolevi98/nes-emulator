@@ -29,6 +29,9 @@ public sealed class Cartridge
 
     public byte[] PrgRom { get; }
 
+    /// <summary>SHA-256 of the loaded image, fixed before any CHR RAM can change.</summary>
+    public ReadOnlyMemory<byte> Identity { get; private init; }
+
     /// <summary>Character memory. Backed by ROM on most cartridges, by RAM on the rest.</summary>
     public byte[] Chr { get; }
 
@@ -152,6 +155,7 @@ public sealed class Cartridge
 
         return new Cartridge(prgRom, chr, chrIsRam)
         {
+            Identity = System.Security.Cryptography.SHA256.HashData(image),
             MapperNumber = mapper,
             Mirroring = mirroring,
             HasBattery = (flags6 & 0x02) != 0,

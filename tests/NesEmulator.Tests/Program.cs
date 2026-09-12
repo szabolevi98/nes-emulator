@@ -7,6 +7,11 @@ using NesEmulator.Core.Input;
 using NesEmulator.Core.Memory;
 using NesEmulator.Core.Ppu;
 
+if (args.Length > 0)
+{
+    return AccuracyRunner.Run(args);
+}
+
 int failures = 0;
 int total = 0;
 
@@ -387,7 +392,9 @@ foreach ((byte a, byte operand, byte result, bool carry, bool overflow) in adcCa
     bus.Memory[0xFFFF] = 0xB0;
     cpu.SetIrqLine(true);
     cpu.Step(); // CLI
-    cpu.Step(); // the interrupt, before the NOP
+    cpu.Step(); // NOP: CLI takes effect after one more instruction
+    Check("irq: CLI delays recognition by one instruction", cpu.PC == 0x8002);
+    cpu.Step(); // the interrupt
     Check("irq: serviced once unmasked", cpu.PC == 0xB000, $"got {cpu.PC:X4}");
 }
 
@@ -444,7 +451,7 @@ foreach ((byte a, byte operand, byte result, bool carry, bool overflow) in adcCa
     (Cpu6502 cpu, _) = Machine(0x02); // JAM
     cpu.Step();
     Check("jam: locks the processor up", cpu.Jammed);
-    Check("jam: parks on the offending opcode", cpu.PC == 0x8000, $"got {cpu.PC:X4}");
+    Check("jam: stops fetching after the opcode", cpu.PC == 0x8001, $"got {cpu.PC:X4}");
 }
 
 // ------------------------------------------------------ read-modify-write
@@ -1127,8 +1134,8 @@ Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
         ppu.Step();
     }
 
-    Check("ppu: clocks the board once per drawn line, pre-render included",
-        counter.Scanlines == 241, $"got {counter.Scanlines}");
+    Check("ppu: exposes pattern and nametable fetches to the board",
+        counter.PatternReads > 0 && counter.NameTableReads > 0);
 }
 
 // -------------------------------------------------------------- sound unit
@@ -1563,6 +1570,8 @@ byte[] BuildBusyRom()
 
 // ------------------------------------------------------------------ summary
 
+RegressionTests.Run((name, pass) => Check(name, pass));
+
 Console.WriteLine();
 Console.WriteLine($"{total - failures}/{total} passed");
 return failures == 0 ? 0 : 1;
@@ -1582,7 +1591,8 @@ sealed class FlatBus : IBus
 /// <summary>A board that does nothing but count the lines it is clocked on.</summary>
 sealed class CountingMapper : IMapper
 {
-    public int Scanlines { get; private set; }
+    public int PatternReads { get; private set; }
+    public int NameTableReads { get; private set; }
 
     public Mirroring Mirroring => Mirroring.Horizontal;
 
@@ -1598,7 +1608,11 @@ sealed class CountingMapper : IMapper
     {
     }
 
-    public void OnScanline() => Scanlines++;
+    public void OnPpuAddress(ushort address, long cycle)
+    {
+        if (address < 0x2000) PatternReads++;
+        else if (address < 0x3F00) NameTableReads++;
+    }
 }
 
 /// <summary>Wraps a bus and notes every write, to check access patterns rather than results.</summary>

@@ -52,6 +52,8 @@ public sealed class Ppu2C02
 
     /// <summary>Reads through $2007 are one fetch behind, except from palette memory.</summary>
     private byte _readBuffer;
+    private byte _ioBus;
+    private long _clock;
 
     // Background fetch pipeline.
     private byte _nameTableByte;
@@ -103,6 +105,7 @@ public sealed class Ppu2C02
         _fineX = 0;
         _writeLatch = false;
         _readBuffer = 0;
+        _ioBus = 0;
         Scanline = PreRenderScanline;
         Cycle = 0;
         _oddFrame = false;
@@ -145,6 +148,8 @@ public sealed class Ppu2C02
         writer.Write(_fineX);
         writer.Write(_writeLatch);
         writer.Write(_readBuffer);
+        writer.Write(_ioBus);
+        writer.Write(_clock);
         writer.Write(_nameTableByte);
         writer.Write(_attributeByte);
         writer.Write(_patternLow);
@@ -158,6 +163,7 @@ public sealed class Ppu2C02
         writer.Write(_spriteShiftHigh);
         writer.Write(_lineSpriteCount);
         writer.Write(_spriteZeroOnLine);
+        writer.Write(_spriteZeroRendering);
         writer.Write(_oddFrame);
         writer.Write(_nmiPending);
         writer.Write(Scanline);
@@ -180,6 +186,8 @@ public sealed class Ppu2C02
         _fineX = reader.ReadByte();
         _writeLatch = reader.ReadBoolean();
         _readBuffer = reader.ReadByte();
+        _ioBus = reader.ReadByte();
+        _clock = reader.ReadInt64();
         _nameTableByte = reader.ReadByte();
         _attributeByte = reader.ReadByte();
         _patternLow = reader.ReadByte();
@@ -193,6 +201,7 @@ public sealed class Ppu2C02
         reader.ReadExactly(_spriteShiftHigh);
         _lineSpriteCount = reader.ReadInt32();
         _spriteZeroOnLine = reader.ReadBoolean();
+        _spriteZeroRendering = reader.ReadBoolean();
         _oddFrame = reader.ReadBoolean();
         _nmiPending = reader.ReadBoolean();
         Scanline = reader.ReadInt32();
@@ -214,14 +223,15 @@ public sealed class Ppu2C02
             case 2:
             {
                 // The unused low bits return whatever was last on the data bus.
-                byte value = (byte)((_status & 0xE0) | (_readBuffer & 0x1F));
+                byte value = (byte)((_status & 0xE0) | (_ioBus & 0x1F));
                 _status &= 0x7F;      // reading clears the vertical blank flag
                 _writeLatch = false;  // and resets the two-write sequence
+                _ioBus = value;
                 return value;
             }
 
             case 4:
-                return _oam[_oamAddress];
+                return _ioBus = _oam[_oamAddress];
 
             case 7:
             {
@@ -231,22 +241,25 @@ public sealed class Ppu2C02
                 // Palette memory answers immediately; everything else is a fetch behind.
                 if ((_v & 0x3FFF) >= 0x3F00)
                 {
-                    value = _readBuffer;
+                    value = (byte)((_readBuffer & 0x3F) | (_ioBus & 0xC0));
+                    _readBuffer = PpuRead((ushort)(_v - 0x1000));
                 }
 
                 _v = (ushort)(_v + AddressIncrement());
+                _mapper.OnPpuAddress((ushort)(_v & 0x3FFF), _clock);
+                _ioBus = value;
                 return value;
             }
 
             default:
                 // The write-only registers return the last value on the bus.
-                return _readBuffer;
+                return _ioBus;
         }
     }
 
     public void WriteRegister(ushort address, byte value)
     {
-        _readBuffer = value;
+        _ioBus = value;
 
         switch (address & 7)
         {
@@ -304,6 +317,7 @@ public sealed class Ppu2C02
                 {
                     _t = (ushort)((_t & 0xFF00) | value);
                     _v = _t;
+                    _mapper.OnPpuAddress((ushort)(_v & 0x3FFF), _clock);
                     _writeLatch = false;
                 }
 
@@ -312,6 +326,7 @@ public sealed class Ppu2C02
             case 7:
                 PpuWrite(_v, value);
                 _v = (ushort)(_v + AddressIncrement());
+                _mapper.OnPpuAddress((ushort)(_v & 0x3FFF), _clock);
                 break;
         }
     }
@@ -326,6 +341,7 @@ public sealed class Ppu2C02
     /// <summary>Advances one picture unit cycle, which is a third of a processor cycle.</summary>
     public void Step()
     {
+        _clock++;
         if (Scanline is >= PreRenderScanline and < ScreenHeight)
         {
             // On odd frames with rendering on, the pre-render line is one cycle short.
@@ -343,14 +359,6 @@ public sealed class Ppu2C02
             {
                 StepBackgroundFetch();
                 StepSprites();
-
-                // Boards that count lines are clocked here. On hardware they watch
-                // an address line rise as the fetch pattern moves between the two
-                // halves of tile memory, which lands around this point in the line.
-                if (Cycle == 260)
-                {
-                    _mapper.OnScanline();
-                }
             }
         }
 
@@ -542,20 +550,21 @@ public sealed class Ppu2C02
 
     private void StepSprites()
     {
-        // Everything is done in two bursts rather than spread across the line: the
-        // search at 257 and the pattern fetches at the end. The visible result is
-        // the same unless a game rewrites sprite memory mid-line.
+        // Evaluation is still batched; the eight fetch slots occupy dots 257-320.
         if (Cycle == 257)
         {
             EvaluateSprites();
         }
 
-        if (Cycle == 340)
+        if (Cycle >= 257 && Cycle <= 320)
         {
-            LoadSpriteShifters();
+            int slot = (Cycle - 257) / 8;
+            int phase = (Cycle - 257) % 8;
+            if (phase is 0 or 2) PpuRead((ushort)(0x2000 | (_v & 0x0FFF)));
+            if (phase is 4 or 6) FetchSpritePattern(slot, phase == 4 ? 0 : 8);
         }
 
-        if (Cycle >= 2 && Cycle < 258 && ShowSprites)
+        if (Cycle >= 2 && Cycle < 257 && ShowSprites)
         {
             for (int i = 0; i < _lineSpriteCount; i++)
             {
@@ -609,48 +618,42 @@ public sealed class Ppu2C02
         }
     }
 
-    private void LoadSpriteShifters()
+    private void FetchSpritePattern(int i, int plane)
     {
         int height = (_ctrl & 0x20) != 0 ? 16 : 8;
+        byte top = _lineSprites[i * 4];
+        byte tile = _lineSprites[(i * 4) + 1];
+        byte attributes = _lineSprites[(i * 4) + 2];
 
-        for (int i = 0; i < _lineSpriteCount; i++)
+        int row = (Scanline - top) & (height - 1);
+        if ((attributes & 0x80) != 0)
         {
-            byte top = _lineSprites[i * 4];
-            byte tile = _lineSprites[(i * 4) + 1];
-            byte attributes = _lineSprites[(i * 4) + 2];
-
-            int row = Scanline - top;
-            if ((attributes & 0x80) != 0)
-            {
-                row = height - 1 - row; // flipped vertically
-            }
-
-            ushort address;
-            if (height == 8)
-            {
-                address = (ushort)((((_ctrl & 0x08) != 0 ? 1 : 0) << 12) | (tile << 4) | row);
-            }
-            else
-            {
-                // Tall sprites pick their own pattern table from the tile number, and
-                // the bottom half lives in the next tile along.
-                address = (ushort)(((tile & 0x01) << 12)
-                    | (((tile & 0xFE) + (row >= 8 ? 1 : 0)) << 4)
-                    | (row & 0x07));
-            }
-
-            byte low = PpuRead(address);
-            byte high = PpuRead((ushort)(address + 8));
-
-            if ((attributes & 0x40) != 0)
-            {
-                low = ReverseBits(low);
-                high = ReverseBits(high);
-            }
-
-            _spriteShiftLow[i] = low;
-            _spriteShiftHigh[i] = high;
+            row = height - 1 - row; // flipped vertically
         }
+
+        ushort address;
+        if (height == 8)
+        {
+            address = (ushort)((((_ctrl & 0x08) != 0 ? 1 : 0) << 12) | (tile << 4) | row);
+        }
+        else
+        {
+            // Tall sprites pick their own pattern table from the tile number, and
+            // the bottom half lives in the next tile along.
+            address = (ushort)(((tile & 0x01) << 12)
+                | (((tile & 0xFE) + (row >= 8 ? 1 : 0)) << 4)
+                | (row & 0x07));
+        }
+
+        byte pattern = PpuRead((ushort)(address + plane));
+
+        if ((attributes & 0x40) != 0)
+        {
+            pattern = ReverseBits(pattern);
+        }
+
+        if (plane == 0) _spriteShiftLow[i] = pattern;
+        else _spriteShiftHigh[i] = pattern;
     }
 
     private static byte ReverseBits(byte value)
@@ -751,6 +754,7 @@ public sealed class Ppu2C02
     private byte PpuRead(ushort address)
     {
         address &= 0x3FFF;
+        _mapper.OnPpuAddress(address, _clock);
 
         if (address < 0x2000)
         {
@@ -768,6 +772,7 @@ public sealed class Ppu2C02
     private void PpuWrite(ushort address, byte value)
     {
         address &= 0x3FFF;
+        _mapper.OnPpuAddress(address, _clock);
 
         if (address < 0x2000)
         {

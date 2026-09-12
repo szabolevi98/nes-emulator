@@ -2,3 +2,8 @@
 # The handwritten demo is ours, so it is the one exception.
 *.nes
 !demo.nes
+
+# Downloaded public validation data and local diagnostic reports.
+/accuracy/
+/cpu-vectors/
+/*-results.*

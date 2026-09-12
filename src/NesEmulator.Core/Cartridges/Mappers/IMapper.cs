@@ -30,6 +30,9 @@ public interface IMapper
     {
     }
 
+    /// <summary>External PPU address bus, timestamped in PPU dots (including CPU register accesses).</summary>
+    void OnPpuAddress(ushort address, long cycle) { }
+
     /// <summary>Whether the board is holding the maskable interrupt line down.</summary>
     bool IrqPending => false;
 

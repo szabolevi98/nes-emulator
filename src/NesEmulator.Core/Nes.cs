@@ -67,7 +67,7 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E01; // "NES" and a format version
+    private const uint StateMagic = 0x53454E02; // "NES" and a format version
 
     /// <summary>
     /// Writes everything that makes this console what it is at this instant. The
@@ -79,7 +79,18 @@ public sealed class Nes
         BinaryWriter writer = new(stream, System.Text.Encoding.UTF8, leaveOpen: true);
         writer.Write(StateMagic);
         writer.Write(Cartridge.MapperNumber);
+        writer.Write(Cartridge.Identity.Span);
 
+        using MemoryStream payload = new();
+        WriteStatePayload(new BinaryWriter(payload));
+        byte[] data = payload.ToArray();
+        writer.Write(data.Length);
+        writer.Write(System.Security.Cryptography.SHA256.HashData(data));
+        writer.Write(data);
+    }
+
+    private void WriteStatePayload(BinaryWriter writer)
+    {
         Cpu.SaveState(writer);
         Ppu.SaveState(writer);
         Apu.SaveState(writer);
@@ -101,7 +112,7 @@ public sealed class Nes
 
         if (reader.ReadUInt32() != StateMagic)
         {
-            throw new InvalidDataException("Not a save state for this emulator.");
+            throw new InvalidDataException("Unsupported save state format. This version requires a v2 state.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -109,6 +120,26 @@ public sealed class Nes
             throw new InvalidDataException("This save state belongs to a different cartridge.");
         }
 
+        byte[] identity = reader.ReadBytes(32);
+        if (!identity.AsSpan().SequenceEqual(Cartridge.Identity.Span))
+            throw new InvalidDataException("This save state belongs to a different ROM image.");
+
+        // Read and verify the complete payload before touching live console state.
+        using MemoryStream current = new();
+        WriteStatePayload(new BinaryWriter(current));
+        int length = reader.ReadInt32();
+        if (length != current.Length)
+            throw new InvalidDataException("The save state has an incompatible size.");
+        byte[] checksum = reader.ReadBytes(32);
+        byte[] data = reader.ReadBytes(length);
+        if (data.Length != length || !checksum.AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(data)))
+            throw new InvalidDataException("The save state is incomplete or damaged.");
+
+        ReadStatePayload(new BinaryReader(new MemoryStream(data)));
+    }
+
+    private void ReadStatePayload(BinaryReader reader)
+    {
         Cpu.LoadState(reader);
         Ppu.LoadState(reader);
         Apu.LoadState(reader);
@@ -140,6 +171,7 @@ public sealed class Nes
                 Cpu.RaiseNmi();
             }
         }
+        Cpu.SetIrqLine(Apu.IrqPending || Mapper.IrqPending);
     }
 
     /// <summary>Runs a single instruction, with the other chips running alongside it.</summary>
@@ -149,13 +181,7 @@ public sealed class Nes
 
         // The sprite transfer holds the processor still but not the clock, so its
         // cycles are spent here rather than inside the instruction that started it.
-        int transfer = Bus.TakeDmaCycles();
-        for (int i = 0; i < transfer; i++)
-        {
-            Tick();
-        }
-
-        Cpu.Cycles += transfer;
+        int transfer = Bus.RunDma(Cpu);
         cycles += transfer;
 
         // Both the sound unit and some cartridge boards hold the maskable
@@ -177,14 +203,6 @@ public sealed class Nes
 
         while (!Ppu.FrameComplete)
         {
-            if (Cpu.Jammed)
-            {
-                // Nothing will advance any more, but the beam still has to finish
-                // the frame or the display would freeze mid-picture.
-                Ppu.Step();
-                continue;
-            }
-
             StepInstruction();
         }
     }

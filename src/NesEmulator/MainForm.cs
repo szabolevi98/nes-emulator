@@ -68,6 +68,7 @@ public sealed class MainForm : Form
     private int _framesSinceCount;
     private double _lastFpsReport;
     private double _fps;
+    private readonly FramePacer _pacer = new();
 
     public MainForm(string? romPath)
     {
@@ -184,6 +185,7 @@ public sealed class MainForm : Form
             ToolStripMenuItem item = (ToolStripMenuItem)sender!;
             item.Checked = !item.Checked;
             _nes?.Apu.DiscardSamples();
+            _pacer.Reset(_stopwatch.Elapsed.TotalSeconds);
         })
         {
             Checked = _audio is not null,
@@ -308,6 +310,7 @@ public sealed class MainForm : Form
 
     private void Start()
     {
+        _pacer.Reset(_stopwatch.Elapsed.TotalSeconds);
         _running = true;
         _pauseItem.Text = "&Pause";
         _clock.Start();
@@ -349,7 +352,7 @@ public sealed class MainForm : Form
     /// Decides how many frames are due. With sound on, that is however many
     /// buffers the card has finished with, so the emulator runs at the speed the
     /// audio is being consumed and never drifts away from it. With sound off
-    /// there is nothing to pace against, so it falls back to one frame a tick.
+    /// the elapsed wall clock decides when the next NTSC frame is due.
     /// </summary>
     private void OnClockTick()
     {
@@ -366,7 +369,8 @@ public sealed class MainForm : Form
 
         if (_audio is null || !_soundItem.Checked)
         {
-            RunOneFrame();
+            int frames = _pacer.FramesDue(_stopwatch.Elapsed.TotalSeconds);
+            for (int i = 0; i < frames; i++) RunOneFrame();
             return;
         }
 
@@ -596,6 +600,7 @@ public sealed class MainForm : Form
             _rewinding = false;
             _rewindTicks = 0;
             _nes?.Apu.DiscardSamples();
+            _pacer.Reset(_stopwatch.Elapsed.TotalSeconds);
             e.Handled = true;
         }
 

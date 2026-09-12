@@ -21,8 +21,11 @@ All three chips work, and a cartridge renders and plays.
 - [x] **Save states and rewind** — a full console state in about five kilobytes compressed, and a minute of play to wind back through
 - [x] **Interleaved clock** — the picture and sound units advance between an instruction's memory accesses, not after it
 - [x] **Disassembler and execution trace**, in a debugger panel beside the screen
-- [ ] A fully cycle-driven processor, modelling every dummy read
-- [ ] The accuracy test ROM results table
+- [x] **Bus-driven CPU cycles** — every instruction read/write and dummy read, including reset, interrupts, stack operations and the JAM bus loop
+- [x] **Accuracy results** — reproducible public ROM runs and all 2,560,000 NES CPU bus-cycle vectors; remaining failures are listed below
+- [x] **MMC3 A12 clocking** — filtered address-line edges, including CPU accesses through PPUADDR and PPUDATA
+- [x] **ROM-bound save states** — image identity, payload size and integrity checks before loading
+- [x] **Silent playback pacing** — elapsed-time scheduling at the NTSC frame rate when audio is disabled or unavailable
 
 ## The parts that are easy to get wrong
 
@@ -76,12 +79,46 @@ PASS  sound: a second of cycles yields a second of samples
 PASS  state: replaying from a state is deterministic
 PASS  rewind: snapshots compress to a fraction of their size
 ...
-168/168 passed
+212/212 passed
 ```
 
 It covers the opcode table itself, every addressing mode including the zero page wraps, the signed overflow cases for addition and subtraction, branch and interrupt timing, the stack and return instructions, the undocumented opcodes, cartridge parsing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes and frame counter, the sprite memory transfer, the controllers, the save state round trip and the rewind ring — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out.
 
-The published accuracy test ROMs are the next measure, and their results table belongs in this README once they run.
+### Public accuracy tests
+
+Measured on Windows x64 with .NET 9 on 2026-09-12. The [complete ROM report](docs/accuracy-results.md) records every result, failure message and ROM SHA-256; the [CPU vector report](docs/cpu-vector-results.txt) lists all 256 opcode results. The runner requires the test's completion signature and status code; it exits nonzero if any ROM fails or times out.
+
+| Suite | Passed | Coverage / remaining issue |
+|---|---:|---|
+| SingleStepTests NES 6502 | 2,560,000 / 2,560,000 | All 256 opcodes; registers, memory, cycle counts and each bus address, value and direction. JAM fixtures check a finite prefix of the halted bus loop. |
+| blargg instruction behavior v5 | 15 / 16 | Immediate LAX (`$AB`) uses a different unstable-opcode model; see below. |
+| Instruction timing | 2 / 2 | Instruction and branch cycle counts |
+| Instruction miscellaneous | 4 / 4 | Page wrapping and dummy reads, including APU registers |
+| CPU dummy writes | 2 / 2 | Both OAM and PPUDATA targets |
+| CPU reset | 2 / 2 | Registers, stack and RAM across reset |
+| CPU interrupts v2 | 1 / 5 | CLI latency passes; NMI/BRK/IRQ, DMA and branch edge timing remain |
+| MMC3 test 2 | 4 / 6 | A12 clocking and counter behavior pass; scanline timing and alternate MMC3A behavior remain |
+| PPU vblank/NMI | 4 / 10 | Basic vblank, clear timing, NMI control and frame lengths pass; edge timing remains |
+| APU test | 3 / 8 | Length counters, length table and IRQ flag pass; frame sequencing and DMC timing remain |
+| **Public ROM total** | **37 / 55** | Failures are retained in the report, including the alternate MMC3 revision |
+
+The CPU vectors come from [SingleStepTests/65x02](https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502). For the unstable `$8B` and `$AB` opcodes this emulator follows that suite's `$EE` mask. blargg's `$AB` checksum assumes a different result, so passing every vector does not imply passing that ROM. The reported discrepancy is intentional and is not hidden by skipping the opcode.
+
+Fetch pinned public test data, then regenerate the ROM report:
+
+```powershell
+./tools/fetch-accuracy-tests.ps1
+dotnet run -c Release --project tests/NesEmulator.Tests -- --rom-suite roms/accuracy docs/accuracy-results.md
+```
+
+The independent bus-cycle vectors are an optional download of roughly 1 GB:
+
+```powershell
+./tools/fetch-accuracy-tests.ps1 -IncludeCpuVectors
+dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cpu-vectors
+```
+
+The normal 212-check suite runs offline and does not download anything. The ROM runner allows 3,600 emulated frames per ROM, handles the standard reset request, and can filter paths with a fourth argument after the report path. Downloaded test data stays out of version control.
 
 ## Trying it
 
@@ -141,13 +178,13 @@ A save state is everything that can change while a game runs — work RAM, the p
 
 That is still too much to keep once a frame, so rewind takes a snapshot every tenth frame and deflates it. A console's memory is mostly repeated bytes and long runs of zero, so they come down to around five kilobytes each: three hundred and sixty of them, a minute of play, costs under two megabytes. Holding backspace walks back through them.
 
-The state format carries the mapper number, so a state from a different cartridge is refused rather than misread into nonsense.
+State format v2 carries the mapper number, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. This format includes the new CPU interrupt samples and mapper address-edge state, and deliberately rejects older v1 state files; create a new save after upgrading.
 
 ## Known limits
 
-The clock now advances between an instruction's memory accesses rather than only at its end, so a game that reads a picture register partway through an instruction sees what the hardware would have shown it. It is not yet a fully cycle-driven core: this one does not perform every dummy read the hardware does, so inside a long instruction an access can still land a cycle or two from where it would on the real chip. Making every cycle a modelled bus cycle is the remaining step.
+Every CPU instruction cycle now performs a bus operation; cycle totals are no longer taken from the opcode table and padded at the end. `Step()` remains an instruction-level host API, with the other chips advancing at each bus access. Sprite DMA also performs its 256 reads and writes over 513 or 514 cycles, according to CPU parity.
 
-The MMC3 line counter is clocked once per drawn line. On hardware it watches one address line of the picture unit rise as the fetch pattern moves between tile memory halves, which can fire at other moments too; per line is the usual simplification and holds for ordinary rendering.
+This does not yet make the whole console cycle-perfect. The public tests expose remaining PPU vblank/NMI suppression and edge timing, APU frame-counter timing, DMC behavior, and interrupt/DMA interactions. DMC memory fetches do not yet arbitrate CPU bus ownership. Sprite evaluation remains batched, although sprite pattern fetches now occupy their individual slots. MMC3 follows filtered A12 edges but still fails the exact scanline IRQ timing test and does not model the alternate MMC3A revision. These are the next accuracy targets, with reproducible failing ROMs in the report.
 
 ## ROMs
 

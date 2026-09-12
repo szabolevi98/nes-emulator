@@ -7,7 +7,8 @@ namespace NesEmulator.Core.Cpu;
 ///
 /// The processor is driven one instruction at a time. <see cref="Step"/> fetches
 /// an opcode, looks it up in <see cref="OpcodeTable"/>, works out the operand
-/// address and performs the operation, charging the cycles as it goes. Cycle
+/// address and performs the operation. Every cycle is a bus read or write,
+/// including dummy reads; the opcode table never pads elapsed time. Cycle
 /// counts matter as much as results here: the picture unit runs three of its own
 /// cycles for every processor cycle, and games lean on that ratio to change
 /// scroll registers partway down a frame.
@@ -34,11 +35,11 @@ public sealed class Cpu6502(IBus bus)
     public byte A;
     public byte X;
     public byte Y;
-    public byte S = 0xFD;
+    public byte S;
     public byte P = FlagInterruptDisable | FlagUnused;
     public ushort PC;
 
-    /// <summary>Cycles burnt since power on. Reset seeds it with the seven the hardware spends.</summary>
+    /// <summary>Cycles since power on. Each reset adds seven real bus cycles.</summary>
     public long Cycles;
 
     /// <summary>Set when an undocumented opcode locks the processor up. Only reset clears it.</summary>
@@ -46,6 +47,14 @@ public sealed class Cpu6502(IBus bus)
 
     private bool _nmiPending;
     private bool _irqLine;
+    private bool _irqReady;
+    private bool _irqSample;
+    private bool _previousIrqSample;
+    private bool _nmiReady;
+    private bool _nmiSample;
+    private bool _previousNmiSample;
+    private bool _stepping;
+    private byte _jamPhase;
 
     /// <summary>
     /// The address an indexed mode started from, before the index was added.
@@ -55,21 +64,29 @@ public sealed class Cpu6502(IBus bus)
 
     public void Reset()
     {
-        A = 0;
-        X = 0;
-        Y = 0;
-        S = 0xFD;
-        P = FlagInterruptDisable | FlagUnused;
-        PC = Read16(ResetVector);
-        Cycles = 7;
         Jammed = false;
+        _jamPhase = 0;
         _nmiPending = false;
         _irqLine = false;
-        _ticksOwed = 0;
+        Read(PC);
+        Read(PC);
+        for (int i = 0; i < 3; i++)
+        {
+            Read((ushort)(StackBase + S));
+            S--;
+        }
+        P = (byte)((P | FlagInterruptDisable | FlagUnused) & ~FlagBreak);
+        PC = Read16(ResetVector);
+        _irqReady = _irqSample = _previousIrqSample = false;
+        _nmiReady = _nmiSample = _previousNmiSample = false;
     }
 
     /// <summary>The picture unit pulls this line low at the start of vertical blank.</summary>
-    public void RaiseNmi() => _nmiPending = true;
+    public void RaiseNmi()
+    {
+        _nmiPending = true;
+        if (!_stepping) _nmiReady = true;
+    }
 
     /// <summary>The sound unit and some cartridge mappers hold this line down until serviced.</summary>
     public void SetIrqLine(bool asserted) => _irqLine = asserted;
@@ -82,75 +99,56 @@ public sealed class Cpu6502(IBus bus)
     /// </summary>
     public Action? OnCycle { get; set; }
 
-    /// <summary>Cycles charged but not yet handed to <see cref="OnCycle"/>.</summary>
-    private int _ticksOwed;
-
     /// <summary>Runs one instruction, or services a pending interrupt. Returns the cycles it cost.</summary>
     public int Step()
     {
         if (Jammed)
         {
-            AddCycles(1);
-            DrainTicks();
+            Read(_jamPhase is 1 or 2 ? (ushort)0xFFFE : (ushort)0xFFFF);
+            if (_jamPhase < 3) _jamPhase++;
             return 1;
         }
 
         long start = Cycles;
+        _stepping = true;
 
-        if (_nmiPending)
+        if (_nmiReady)
         {
             _nmiPending = false;
+            _nmiReady = false;
             ServiceInterrupt(NmiVector);
         }
-        else if (_irqLine && (P & FlagInterruptDisable) == 0)
+        else if (_irqReady)
         {
             ServiceInterrupt(IrqVector);
         }
         else
         {
-            // The fetch is the instruction's first cycle, so it is owed before the
-            // table can say how many more there are.
-            _ticksOwed++;
             byte opcode = Read(PC++);
-
             OpcodeInfo info = OpcodeTable.Entries[opcode];
-            Cycles += info.Cycles;
-            _ticksOwed += info.Cycles - 1;
-
-            ushort address = Resolve(info.Mode, info.PageCross);
+            // JSR fetches the high operand byte only after pushing its return address.
+            ushort address = info.Op == Op.JSR ? Read(PC++) : Resolve(info.Mode, info.PageCross);
             Execute(info.Op, info.Mode, address);
         }
 
-        // Whatever the instruction did not spend on the bus — internal cycles, and
-        // the ones this core does not model as dummy reads — is spent here.
-        DrainTicks();
+        // Interrupts are polled on the penultimate cycle. In particular, CLI,
+        // SEI and PLP change I after their poll, whereas RTI pulls P earlier.
+        _irqReady = _previousIrqSample;
+        _nmiReady = _previousNmiSample && _nmiPending;
+        _stepping = false;
 
         return (int)(Cycles - start);
     }
 
-    private void AddCycles(int count)
-    {
-        Cycles += count;
-        _ticksOwed += count;
-    }
-
-    /// <summary>Hands one owed cycle to the rest of the console, before a bus access.</summary>
+    /// <summary>Every clock is a real bus access, including discarded reads.</summary>
     private void ConsumeTick()
     {
-        if (_ticksOwed > 0)
-        {
-            _ticksOwed--;
-            OnCycle?.Invoke();
-        }
-    }
-
-    private void DrainTicks()
-    {
-        while (_ticksOwed > 0)
-        {
-            _ticksOwed--;
-            OnCycle?.Invoke();
-        }
+        Cycles++;
+        OnCycle?.Invoke();
+        _previousIrqSample = _irqSample;
+        _irqSample = _irqLine && (P & FlagInterruptDisable) == 0;
+        _previousNmiSample = _nmiSample;
+        _nmiSample = _nmiPending;
     }
 
     private byte Read(ushort address)
@@ -177,9 +175,16 @@ public sealed class Cpu6502(IBus bus)
         writer.Write(PC);
         writer.Write(Cycles);
         writer.Write(Jammed);
+        writer.Write(_jamPhase);
         writer.Write(_nmiPending);
         writer.Write(_irqLine);
         writer.Write(_baseAddress);
+        writer.Write(_irqReady);
+        writer.Write(_irqSample);
+        writer.Write(_previousIrqSample);
+        writer.Write(_nmiReady);
+        writer.Write(_nmiSample);
+        writer.Write(_previousNmiSample);
     }
 
     internal void LoadState(BinaryReader reader)
@@ -192,9 +197,16 @@ public sealed class Cpu6502(IBus bus)
         PC = reader.ReadUInt16();
         Cycles = reader.ReadInt64();
         Jammed = reader.ReadBoolean();
+        _jamPhase = reader.ReadByte();
         _nmiPending = reader.ReadBoolean();
         _irqLine = reader.ReadBoolean();
         _baseAddress = reader.ReadUInt16();
+        _irqReady = reader.ReadBoolean();
+        _irqSample = reader.ReadBoolean();
+        _previousIrqSample = reader.ReadBoolean();
+        _nmiReady = reader.ReadBoolean();
+        _nmiSample = reader.ReadBoolean();
+        _previousNmiSample = reader.ReadBoolean();
     }
 
     // ------------------------------------------------------------ addressing
@@ -205,6 +217,7 @@ public sealed class Cpu6502(IBus bus)
         {
             case Am.Implied:
             case Am.Accumulator:
+                Read(PC);
                 return 0;
 
             case Am.Immediate:
@@ -214,10 +227,12 @@ public sealed class Cpu6502(IBus bus)
                 return Read(PC++);
 
             case Am.ZeroPageX:
-                return (byte)(Read(PC++) + X);
-
             case Am.ZeroPageY:
-                return (byte)(Read(PC++) + Y);
+            {
+                byte pointer = Read(PC++);
+                Read(pointer);
+                return (byte)(pointer + (mode == Am.ZeroPageX ? X : Y));
+            }
 
             case Am.Relative:
             {
@@ -237,9 +252,9 @@ public sealed class Cpu6502(IBus bus)
                 _baseAddress = Read16(PC);
                 PC += 2;
                 ushort address = (ushort)(_baseAddress + X);
-                if (pageCrossPenalty && CrossesPage(_baseAddress, address))
+                if (!pageCrossPenalty || CrossesPage(_baseAddress, address))
                 {
-                    AddCycles(1);
+                    Read((ushort)((_baseAddress & 0xFF00) | (address & 0xFF)));
                 }
 
                 return address;
@@ -250,9 +265,9 @@ public sealed class Cpu6502(IBus bus)
                 _baseAddress = Read16(PC);
                 PC += 2;
                 ushort address = (ushort)(_baseAddress + Y);
-                if (pageCrossPenalty && CrossesPage(_baseAddress, address))
+                if (!pageCrossPenalty || CrossesPage(_baseAddress, address))
                 {
-                    AddCycles(1);
+                    Read((ushort)((_baseAddress & 0xFF00) | (address & 0xFF)));
                 }
 
                 return address;
@@ -267,8 +282,9 @@ public sealed class Cpu6502(IBus bus)
 
             case Am.IndexedIndirect:
             {
-                byte pointer = (byte)(Read(PC++) + X);
-                return Read16ZeroPage(pointer);
+                byte pointer = Read(PC++);
+                Read(pointer);
+                return Read16ZeroPage((byte)(pointer + X));
             }
 
             case Am.IndirectIndexed:
@@ -276,9 +292,9 @@ public sealed class Cpu6502(IBus bus)
                 byte pointer = Read(PC++);
                 _baseAddress = Read16ZeroPage(pointer);
                 ushort address = (ushort)(_baseAddress + Y);
-                if (pageCrossPenalty && CrossesPage(_baseAddress, address))
+                if (!pageCrossPenalty || CrossesPage(_baseAddress, address))
                 {
-                    AddCycles(1);
+                    Read((ushort)((_baseAddress & 0xFF00) | (address & 0xFF)));
                 }
 
                 return address;
@@ -420,9 +436,9 @@ public sealed class Cpu6502(IBus bus)
             case Op.TXS: S = X; break;
 
             case Op.PHA: Push(A); break;
-            case Op.PLA: A = Pull(); SetZeroNegative(A); break;
+            case Op.PLA: Read((ushort)(StackBase + S)); A = Pull(); SetZeroNegative(A); break;
             case Op.PHP: Push((byte)(P | FlagBreak | FlagUnused)); break;
-            case Op.PLP: P = (byte)((Pull() & ~FlagBreak) | FlagUnused); break;
+            case Op.PLP: Read((ushort)(StackBase + S)); P = (byte)((Pull() & ~FlagBreak) | FlagUnused); break;
 
             case Op.CLC: SetFlag(FlagCarry, false); break;
             case Op.SEC: SetFlag(FlagCarry, true); break;
@@ -444,14 +460,20 @@ public sealed class Cpu6502(IBus bus)
             case Op.JMP: PC = address; break;
 
             case Op.JSR:
-                // The address of the last byte of this instruction, not the next one.
-                Push16((ushort)(PC - 1));
-                PC = address;
+                Read((ushort)(StackBase + S));
+                Push16(PC);
+                PC = (ushort)(address | (Read(PC) << 8));
                 break;
 
-            case Op.RTS: PC = (ushort)(Pull16() + 1); break;
+            case Op.RTS:
+                Read((ushort)(StackBase + S));
+                PC = Pull16();
+                Read(PC);
+                PC++;
+                break;
 
             case Op.RTI:
+                Read((ushort)(StackBase + S));
                 P = (byte)((Pull() & ~FlagBreak) | FlagUnused);
                 PC = Pull16();
                 break;
@@ -461,7 +483,7 @@ public sealed class Cpu6502(IBus bus)
                 Push16(PC);
                 Push((byte)(P | FlagBreak | FlagUnused));
                 SetFlag(FlagInterruptDisable, true);
-                PC = Read16(IrqVector);
+                PC = ReadInterruptVector(IrqVector);
                 break;
 
             case Op.NOP:
@@ -514,7 +536,8 @@ public sealed class Cpu6502(IBus bus)
             case Op.SAX: Write(address, (byte)(A & X)); break;
 
             case Op.LAX:
-                A = Read(address);
+                // The immediate variant has the same unstable internal mask as XAA.
+                A = (byte)(Read(address) & (mode == Am.Immediate ? A | 0xEE : 0xFF));
                 X = A;
                 SetZeroNegative(A);
                 break;
@@ -565,9 +588,9 @@ public sealed class Cpu6502(IBus bus)
             }
 
             case Op.XAA:
-                // Genuinely unstable on hardware: the result depends on analog decay
-                // in the accumulator. This is the behaviour most test ROMs assume.
-                A = (byte)(X & Read(address));
+                // Unstable silicon behavior: use the 0xEE mask from the NES
+                // SingleStepTests model, also used for immediate LAX (0xAB).
+                A = (byte)((A | 0xEE) & X & Read(address));
                 SetZeroNegative(A);
                 break;
 
@@ -583,18 +606,18 @@ public sealed class Cpu6502(IBus bus)
 
             // The stores below drop the high byte of the target address into the
             // value being written, because the address bus is still driving it.
-            case Op.AHX: Write(address, (byte)(A & X & HighByteMask())); break;
-            case Op.SHY: Write(address, (byte)(Y & HighByteMask())); break;
-            case Op.SHX: Write(address, (byte)(X & HighByteMask())); break;
+            case Op.AHX: WriteUnstable(address, (byte)(A & X & HighByteMask())); break;
+            case Op.SHY: WriteUnstable(address, (byte)(Y & HighByteMask())); break;
+            case Op.SHX: WriteUnstable(address, (byte)(X & HighByteMask())); break;
 
             case Op.TAS:
                 S = (byte)(A & X);
-                Write(address, (byte)(S & HighByteMask()));
+                WriteUnstable(address, (byte)(S & HighByteMask()));
                 break;
 
             case Op.JAM:
                 Jammed = true;
-                PC--; // Park on the offending opcode so a debugger can show it.
+                _jamPhase = 0;
                 break;
 
             default:
@@ -603,6 +626,12 @@ public sealed class Cpu6502(IBus bus)
     }
 
     private byte HighByteMask() => (byte)((_baseAddress >> 8) + 1);
+
+    private void WriteUnstable(ushort address, byte value)
+    {
+        if (CrossesPage(_baseAddress, address)) address = (ushort)((value << 8) | (address & 0xFF));
+        Write(address, value);
+    }
 
     // -------------------------------------------------------------- helpers
 
@@ -675,10 +704,10 @@ public sealed class Cpu6502(IBus bus)
             return;
         }
 
-        AddCycles(1);
+        Read(PC);
         if (CrossesPage(PC, target))
         {
-            AddCycles(1);
+            Read((ushort)((PC & 0xFF00) | (target & 0xFF)));
         }
 
         PC = target;
@@ -686,12 +715,30 @@ public sealed class Cpu6502(IBus bus)
 
     private void ServiceInterrupt(ushort vector)
     {
+        Read(PC);
+        Read(PC);
         Push16(PC);
         Push((byte)((P | FlagUnused) & ~FlagBreak));
         SetFlag(FlagInterruptDisable, true);
-        PC = Read16(vector);
-        AddCycles(7);
+        PC = ReadInterruptVector(vector);
     }
+
+    private ushort ReadInterruptVector(ushort vector)
+    {
+        // An NMI edge before vector fetch can hijack IRQ/BRK without changing
+        // the return address or the B bit already pushed onto the stack.
+        if (_nmiPending)
+        {
+            vector = NmiVector;
+            _nmiPending = false;
+            _nmiReady = false;
+        }
+        return Read16(vector);
+    }
+
+    // DMA also owns real bus cycles, with all chips continuing to tick.
+    internal byte DmaRead(ushort address) => Read(address);
+    internal void DmaWrite(ushort address, byte value) => Write(address, value);
 
     private void Push(byte value)
     {
