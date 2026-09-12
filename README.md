@@ -23,7 +23,7 @@ How the interesting parts work, and which hardware quirks had to be reproduced r
 
 ## Accuracy
 
-Two things are measured here. One is a suite of 239 checks that runs offline with every build. The other is the public test ROMs, which are a different kind of instrument: they are written to break emulators on cycle-exact edges, not to check whether games run. Passing all of them is what "cycle-perfect" means, and this emulator is not there yet.
+Two things are measured here. One is a suite of 239 checks that runs offline with every build. The other is the public test ROMs, and they are a different instrument: they are written to break emulators on cycle-exact edges rather than to check whether games run. Sweeping all of them is the definition of cycle-perfect, a bar very few emulators clear. The table says where this one stands.
 
 | Measure | Passed | What it covers |
 |---|---:|---|
