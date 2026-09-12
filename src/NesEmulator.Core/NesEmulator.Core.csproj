@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>NesEmulator.Core</RootNamespace>
+    <AssemblyName>NesEmulator.Core</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>AnyCPU;x64</Platforms>
+    <Version>0.1.0</Version>
+    <Product>NES Emulator</Product>
+    <Company>szabolevi98</Company>
+    <Copyright>Copyright (c) 2026 szabolevi98</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NesEmulator.Tests" />
+  </ItemGroup>
+
+</Project>
