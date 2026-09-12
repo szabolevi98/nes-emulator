@@ -18,10 +18,11 @@ All three chips work, and a cartridge renders and plays.
 - [x] **Sprite memory transfer** — the page copy through $4014, with the processor held still for it
 - [x] **Controllers** — both ports, as the serial shift registers they are
 - [x] **Cartridges** — iNES parsing, and mappers 0, 1, 2, 3 and 4, which between them cover most of the library
+- [x] **Save states and rewind** — a full console state in about five kilobytes compressed, and a minute of play to wind back through
+- [x] **Interleaved clock** — the picture and sound units advance between an instruction's memory accesses, not after it
 - [x] **Disassembler and execution trace**, in a debugger panel beside the screen
-- [ ] Save states and rewind
-- [ ] A per-cycle processor and picture unit interleave
-- [ ] Second controller mapped to the keyboard
+- [ ] A fully cycle-driven processor, modelling every dummy read
+- [ ] The accuracy test ROM results table
 
 ## The parts that are easy to get wrong
 
@@ -72,11 +73,13 @@ PASS  render: the leftmost squares are clipped away
 PASS  mmc3: the interrupt arrives on the counted line
 PASS  frame counter: interrupts at the end of the sequence
 PASS  sound: a second of cycles yields a second of samples
+PASS  state: replaying from a state is deterministic
+PASS  rewind: snapshots compress to a fraction of their size
 ...
-154/154 passed
+168/168 passed
 ```
 
-It covers the opcode table itself, every addressing mode including the zero page wraps, the signed overflow cases for addition and subtraction, branch and interrupt timing, the stack and return instructions, the undocumented opcodes, cartridge parsing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes and frame counter, the sprite memory transfer, the controllers — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out.
+It covers the opcode table itself, every addressing mode including the zero page wraps, the signed overflow cases for addition and subtraction, branch and interrupt timing, the stack and return instructions, the undocumented opcodes, cartridge parsing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes and frame counter, the sprite memory transfer, the controllers, the save state round trip and the rewind ring — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out.
 
 The published accuracy test ROMs are the next measure, and their results table belongs in this README once they run.
 
@@ -91,9 +94,10 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 
 | | |
 |---|---|
-| D-pad | Arrow keys |
-| A / B | X / Z |
-| Start / Select | Enter / Shift |
+| Player one | Arrows, X and Z, Enter and Shift |
+| Player two | WASD, G and F, R and T |
+| Save / load state | F1 / F4 |
+| Rewind | Hold Backspace |
 | Pause | F5 |
 | Reset | Ctrl+R |
 | Sound | Emulation menu |
@@ -123,6 +127,7 @@ NesEmulator.exe roms\demo.nes
   - `Apu/` — the sound unit and its five channels
   - `Cartridges/` — iNES parsing and the mappers
   - `Memory/` — the processor address space
+  - `RewindBuffer.cs` — the compressed ring of recent states
   - `Input/` — the controllers
 - `src/NesEmulator/` — the Windows Forms shell and the wave output
 - `tests/NesEmulator.Tests/` — the console test runner
@@ -130,9 +135,19 @@ NesEmulator.exe roms\demo.nes
 
 `Cpu/OpcodeTable.cs` holds all 256 entries written out in full, four to a line, so a row matches a row of the published opcode matrix and can be checked against it by eye. Writing it as data rather than as a switch is also what makes the disassembler nearly free.
 
+## Winding back
+
+A save state is everything that can change while a game runs — work RAM, the picture unit's memory and registers, the sound unit's counters, the cartridge's own RAM and bank registers, and the finished picture so that loading mid-frame does not show half of the old one. The cartridge ROM is not in it, which is what keeps a state to about seventy kilobytes.
+
+That is still too much to keep once a frame, so rewind takes a snapshot every tenth frame and deflates it. A console's memory is mostly repeated bytes and long runs of zero, so they come down to around five kilobytes each: three hundred and sixty of them, a minute of play, costs under two megabytes. Holding backspace walks back through them.
+
+The state format carries the mapper number, so a state from a different cartridge is refused rather than misread into nonsense.
+
 ## Known limits
 
-The processor is allowed to finish an instruction before the picture unit is caught up to it. That is accurate at instruction boundaries but not inside one, so a game polling a picture register in a tight loop can see a change a few cycles later than hardware would show it. Moving to a per-cycle interleave is what fixes it, and it is on the list above.
+The clock now advances between an instruction's memory accesses rather than only at its end, so a game that reads a picture register partway through an instruction sees what the hardware would have shown it. It is not yet a fully cycle-driven core: this one does not perform every dummy read the hardware does, so inside a long instruction an access can still land a cycle or two from where it would on the real chip. Making every cycle a modelled bus cycle is the remaining step.
+
+The MMC3 line counter is clocked once per drawn line. On hardware it watches one address line of the picture unit rise as the fetch pattern moves between tile memory halves, which can fire at other moments too; per line is the usual simplification and holds for ordinary rendering.
 
 ## ROMs
 

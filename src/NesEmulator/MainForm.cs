@@ -34,6 +34,19 @@ public sealed class MainForm : Form
         [Keys.ShiftKey] = NesButton.Select,
     };
 
+    /// <summary>The second port, on the left of the keyboard so two can share one.</summary>
+    private static readonly Dictionary<Keys, NesButton> KeyMap2 = new()
+    {
+        [Keys.W] = NesButton.Up,
+        [Keys.S] = NesButton.Down,
+        [Keys.A] = NesButton.Left,
+        [Keys.D] = NesButton.Right,
+        [Keys.G] = NesButton.A,
+        [Keys.F] = NesButton.B,
+        [Keys.R] = NesButton.Start,
+        [Keys.T] = NesButton.Select,
+    };
+
     private readonly ScreenControl _screen;
     private readonly Panel _debugger;
     private readonly Label _summary;
@@ -47,6 +60,10 @@ public sealed class MainForm : Form
     private WaveOutPlayer? _audio;
 
     private Nes? _nes;
+    private RewindBuffer? _rewind;
+    private string? _romPath;
+    private bool _rewinding;
+    private int _rewindTicks;
     private bool _running;
     private int _framesSinceCount;
     private double _lastFpsReport;
@@ -132,6 +149,15 @@ public sealed class MainForm : Form
         file.DropDownItems.Add(new ToolStripMenuItem("&Open ROM...", null, (_, _) => OpenRom())
         {
             ShortcutKeys = Keys.Control | Keys.O,
+        });
+        file.DropDownItems.Add(new ToolStripSeparator());
+        file.DropDownItems.Add(new ToolStripMenuItem("&Save State", null, (_, _) => SaveState())
+        {
+            ShortcutKeys = Keys.F1,
+        });
+        file.DropDownItems.Add(new ToolStripMenuItem("&Load State", null, (_, _) => LoadState())
+        {
+            ShortcutKeys = Keys.F4,
         });
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(new ToolStripMenuItem("E&xit", null, (_, _) => Close()));
@@ -255,6 +281,8 @@ public sealed class MainForm : Form
         try
         {
             _nes = Nes.FromFile(path);
+            _rewind = new RewindBuffer(_nes);
+            _romPath = path;
             _trace.Clear();
             _summary.ForeColor = Muted;
             _summary.Text = $"{Path.GetFileName(path)} — {_nes.Cartridge}";
@@ -266,6 +294,8 @@ public sealed class MainForm : Form
             when (exception is InvalidDataException or NotSupportedException or IOException)
         {
             _nes = null;
+            _rewind = null;
+            _romPath = null;
             Stop();
             _pauseItem.Enabled = false;
             _summary.ForeColor = Warning;
@@ -328,6 +358,12 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (_rewinding)
+        {
+            StepBack();
+            return;
+        }
+
         if (_audio is null || !_soundItem.Checked)
         {
             RunOneFrame();
@@ -350,6 +386,7 @@ public sealed class MainForm : Form
         }
 
         _nes.RunFrame();
+        _rewind?.OnFrame();
         _screen.Present(_nes.Ppu.FrameBuffer);
         PlayAudio();
 
@@ -366,6 +403,86 @@ public sealed class MainForm : Form
         {
             RefreshState();
         }
+    }
+
+    /// <summary>Winds one snapshot back and shows it. Each is a few frames of play.</summary>
+    private void StepBack()
+    {
+        // One snapshot per few ticks, so winding back reads as fast rewind rather
+        // than an instant jump to the start.
+        if (++_rewindTicks < 4)
+        {
+            return;
+        }
+
+        _rewindTicks = 0;
+
+        if (_nes is null || _rewind is null || !_rewind.StepBack())
+        {
+            return;
+        }
+
+        _screen.Present(_nes.Ppu.FrameBuffer);
+        RefreshState();
+    }
+
+    private string StatePath() =>
+        Path.ChangeExtension(_romPath ?? string.Empty, ".state");
+
+    private void SaveState()
+    {
+        if (_nes is null || _romPath is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using FileStream file = File.Create(StatePath());
+            _nes.SaveState(file);
+            Announce($"State saved to {Path.GetFileName(StatePath())}");
+        }
+        catch (IOException exception)
+        {
+            Announce(exception.Message, warning: true);
+        }
+    }
+
+    private void LoadState()
+    {
+        if (_nes is null || _romPath is null)
+        {
+            return;
+        }
+
+        string path = StatePath();
+        if (!File.Exists(path))
+        {
+            Announce("No saved state for this cartridge yet.", warning: true);
+            return;
+        }
+
+        try
+        {
+            using FileStream file = File.OpenRead(path);
+            _nes.LoadState(file);
+
+            // What was recorded before this jump no longer leads here.
+            _rewind?.Clear();
+            _screen.Present(_nes.Ppu.FrameBuffer);
+            RefreshState();
+            Announce($"State loaded from {Path.GetFileName(path)}");
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or EndOfStreamException)
+        {
+            Announce(exception.Message, warning: true);
+        }
+    }
+
+    private void Announce(string message, bool warning = false)
+    {
+        _summary.ForeColor = warning ? Warning : Muted;
+        _summary.Text = message;
     }
 
     private void PlayAudio()
@@ -431,7 +548,9 @@ public sealed class MainForm : Form
             $"PC:{cpu.PC:X4} A:{cpu.A:X2} X:{cpu.X:X2} Y:{cpu.Y:X2} " +
             $"P:{cpu.P:X2}[{Flags(cpu.P)}] SP:{cpu.S:X2}  " +
             $"line {_nes.Ppu.Scanline,4} dot {_nes.Ppu.Cycle,3}  {_fps:0.0} fps" +
-            (cpu.Jammed ? "  — JAMMED" : _running ? string.Empty : "  — paused");
+            (cpu.Jammed ? "  — JAMMED"
+                : _rewinding ? $"  — rewinding, {_rewind?.Count ?? 0} left"
+                : _running ? string.Empty : "  — paused");
     }
 
     private static string Flags(byte p)
@@ -449,9 +568,21 @@ public sealed class MainForm : Form
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        if (e.KeyCode == Keys.Back && _rewind is not null)
+        {
+            _rewinding = true;
+            e.Handled = true;
+        }
+
         if (_nes is not null && KeyMap.TryGetValue(e.KeyCode, out NesButton button))
         {
             _nes.Port1.Buttons |= button;
+            e.Handled = true;
+        }
+
+        if (_nes is not null && KeyMap2.TryGetValue(e.KeyCode, out NesButton second))
+        {
+            _nes.Port2.Buttons |= second;
             e.Handled = true;
         }
 
@@ -460,9 +591,23 @@ public sealed class MainForm : Form
 
     protected override void OnKeyUp(KeyEventArgs e)
     {
+        if (e.KeyCode == Keys.Back)
+        {
+            _rewinding = false;
+            _rewindTicks = 0;
+            _nes?.Apu.DiscardSamples();
+            e.Handled = true;
+        }
+
         if (_nes is not null && KeyMap.TryGetValue(e.KeyCode, out NesButton button))
         {
             _nes.Port1.Buttons &= ~button;
+            e.Handled = true;
+        }
+
+        if (_nes is not null && KeyMap2.TryGetValue(e.KeyCode, out NesButton second))
+        {
+            _nes.Port2.Buttons &= ~second;
             e.Handled = true;
         }
 
@@ -471,7 +616,7 @@ public sealed class MainForm : Form
 
     /// <summary>The arrow keys would otherwise move focus between controls.</summary>
     protected override bool IsInputKey(Keys keyData) =>
-        KeyMap.ContainsKey(keyData) || base.IsInputKey(keyData);
+        KeyMap.ContainsKey(keyData) || KeyMap2.ContainsKey(keyData) || base.IsInputKey(keyData);
 
     protected override void Dispose(bool disposing)
     {
