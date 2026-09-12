@@ -1,0 +1,116 @@
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using NesEmulator.Core.Ppu;
+
+namespace NesEmulator.Controls;
+
+/// <summary>
+/// Shows what the picture unit produced. The frame arrives as one palette index
+/// per pixel, which is turned into colour here rather than in the emulator, so
+/// the core stays free of any drawing library.
+///
+/// Scaling is nearest neighbour and, where it fits, a whole number of pixels per
+/// pixel: anything smoother turns the art into mush, because these tiles were
+/// drawn for a screen where one pixel was one pixel.
+/// </summary>
+public sealed class ScreenControl : Control
+{
+    private readonly Bitmap _bitmap = new(
+        Ppu2C02.ScreenWidth,
+        Ppu2C02.ScreenHeight,
+        PixelFormat.Format32bppRgb);
+
+    private readonly int[] _pixels = new int[Ppu2C02.ScreenWidth * Ppu2C02.ScreenHeight];
+
+    public ScreenControl()
+    {
+        DoubleBuffered = true;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.Opaque, true);
+        BackColor = Color.Black;
+    }
+
+    /// <summary>Converts a frame of palette indices and asks for a repaint.</summary>
+    public void Present(byte[] frame)
+    {
+        for (int i = 0; i < _pixels.Length; i++)
+        {
+            _pixels[i] = NesPalette.Rgb[frame[i] & 0x3F];
+        }
+
+        BitmapData data = _bitmap.LockBits(
+            new Rectangle(0, 0, _bitmap.Width, _bitmap.Height),
+            ImageLockMode.WriteOnly,
+            PixelFormat.Format32bppRgb);
+
+        try
+        {
+            System.Runtime.InteropServices.Marshal.Copy(_pixels, 0, data.Scan0, _pixels.Length);
+        }
+        finally
+        {
+            _bitmap.UnlockBits(data);
+        }
+
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+        e.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
+        e.Graphics.Clear(BackColor);
+
+        Rectangle target = FitInside(ClientSize);
+        if (target.Width > 0 && target.Height > 0)
+        {
+            e.Graphics.DrawImage(_bitmap, target);
+        }
+    }
+
+    /// <summary>Largest centred rectangle of the right shape that fits the control.</summary>
+    private static Rectangle FitInside(Size available)
+    {
+        if (available.Width <= 0 || available.Height <= 0)
+        {
+            return Rectangle.Empty;
+        }
+
+        int scale = Math.Min(
+            available.Width / Ppu2C02.ScreenWidth,
+            available.Height / Ppu2C02.ScreenHeight);
+
+        int width;
+        int height;
+
+        if (scale >= 1)
+        {
+            width = Ppu2C02.ScreenWidth * scale;
+            height = Ppu2C02.ScreenHeight * scale;
+        }
+        else
+        {
+            // Smaller than one to one: keep the shape and accept the resampling.
+            double factor = Math.Min(
+                (double)available.Width / Ppu2C02.ScreenWidth,
+                (double)available.Height / Ppu2C02.ScreenHeight);
+            width = (int)(Ppu2C02.ScreenWidth * factor);
+            height = (int)(Ppu2C02.ScreenHeight * factor);
+        }
+
+        return new Rectangle(
+            (available.Width - width) / 2,
+            (available.Height - height) / 2,
+            width,
+            height);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _bitmap.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+}
