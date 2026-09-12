@@ -1,0 +1,4 @@
+# Cartridge images are copyrighted and stay out of version control.
+# The handwritten demo is ours, so it is the one exception.
+*.nes
+!demo.nes
