@@ -198,6 +198,7 @@ public sealed class MainForm : Form, IMessageFilter
         {
             Checked = _audio is not null,
             Enabled = _audio is not null,
+            ShortcutKeyDisplayString = "M",
         };
 
         ToolStripMenuItem emulation = new("&Emulation");
@@ -621,7 +622,7 @@ public sealed class MainForm : Form, IMessageFilter
         const int KeyDown = 0x0100, KeyUp = 0x0101;
         const int SysKeyDown = 0x0104, SysKeyUp = 0x0105;
         if (m.Msg is not (KeyDown or KeyUp or SysKeyDown or SysKeyUp)
-            || !Enabled || _menuActive || _nes is null
+            || !Enabled || _menuActive
             || Control.FromChildHandle(m.HWnd)?.FindForm() != this)
         {
             return false;
@@ -636,6 +637,18 @@ public sealed class MainForm : Form, IMessageFilter
         }
 
         Keys key = (Keys)(int)m.WParam & Keys.KeyCode;
+        if (key == Keys.M)
+        {
+            // Toggle once per press; holding M must not repeatedly flip the sound.
+            if (pressed && ((long)m.LParam & (1L << 30)) == 0 && _soundItem.Enabled)
+            {
+                _soundItem.PerformClick();
+            }
+            return true;
+        }
+
+        if (_nes is null) return false;
+
         if (key == Keys.Back && _rewind is not null)
         {
             if (pressed) _rewinding = true;

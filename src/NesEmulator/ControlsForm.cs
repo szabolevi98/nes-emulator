@@ -51,13 +51,14 @@ public sealed class ControlsForm : Form
         int shortcutRow = 0;
         foreach (ToolStripMenuItem item in menu.Items.OfType<ToolStripMenuItem>()
             .SelectMany(section => section.DropDownItems.OfType<ToolStripMenuItem>())
-            .Where(item => item.ShortcutKeys != Keys.None))
+            .Where(item => item.ShortcutKeys != Keys.None || !string.IsNullOrEmpty(item.ShortcutKeyDisplayString)))
         {
             int y = 166 + shortcutRow++ * 24;
             string action = item.ShortcutKeys == Keys.F5
                 ? "Pause / resume"
                 : (item.Text ?? string.Empty).Replace("&", string.Empty).Replace("...", string.Empty);
-            AddLabel(FormatKey(item.ShortcutKeys), 370, y);
+            AddLabel(string.IsNullOrEmpty(item.ShortcutKeyDisplayString)
+                ? FormatKey(item.ShortcutKeys) : item.ShortcutKeyDisplayString, 370, y);
             AddLabel(action, 520, y, color: Muted);
         }
         AddLabel("Backspace (hold)", 370, 166 + shortcutRow * 24);

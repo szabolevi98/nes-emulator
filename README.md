@@ -137,7 +137,7 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 | Rewind | Hold Backspace |
 | Pause | F5 |
 | Reset | Ctrl+R |
-| Sound | Emulation menu |
+| Mute / unmute | M (also Emulation → Sound) |
 | Debugger | F12 |
 
 The debugger panel folds out beside the screen and shows the register file, the beam position and the same instruction trace the processor was built against.
