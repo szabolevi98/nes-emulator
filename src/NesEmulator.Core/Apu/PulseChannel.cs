@@ -130,4 +130,36 @@ public sealed class PulseChannel(bool isFirstChannel)
 
         return Envelope.Output;
     }
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        Length.SaveState(writer);
+        Envelope.SaveState(writer);
+        writer.Write(_duty);
+        writer.Write(_sequence);
+        writer.Write(_timer);
+        writer.Write(_timerPeriod);
+        writer.Write(_sweepEnabled);
+        writer.Write(_sweepNegate);
+        writer.Write(_sweepReload);
+        writer.Write(_sweepPeriod);
+        writer.Write(_sweepShift);
+        writer.Write(_sweepDivider);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        Length.LoadState(reader);
+        Envelope.LoadState(reader);
+        _duty = reader.ReadInt32();
+        _sequence = reader.ReadInt32();
+        _timer = reader.ReadInt32();
+        _timerPeriod = reader.ReadInt32();
+        _sweepEnabled = reader.ReadBoolean();
+        _sweepNegate = reader.ReadBoolean();
+        _sweepReload = reader.ReadBoolean();
+        _sweepPeriod = reader.ReadInt32();
+        _sweepShift = reader.ReadInt32();
+        _sweepDivider = reader.ReadInt32();
+    }
 }

@@ -65,6 +65,7 @@ public sealed class Cpu6502(IBus bus)
         Jammed = false;
         _nmiPending = false;
         _irqLine = false;
+        _ticksOwed = 0;
     }
 
     /// <summary>The picture unit pulls this line low at the start of vertical blank.</summary>
@@ -73,12 +74,24 @@ public sealed class Cpu6502(IBus bus)
     /// <summary>The sound unit and some cartridge mappers hold this line down until serviced.</summary>
     public void SetIrqLine(bool asserted) => _irqLine = asserted;
 
+    /// <summary>
+    /// Called once for every cycle the processor spends, as it spends it. The
+    /// console uses this to run the picture and sound units alongside the
+    /// instruction rather than after it, which is what lets a game read a picture
+    /// register partway through and see the value the hardware would have shown.
+    /// </summary>
+    public Action? OnCycle { get; set; }
+
+    /// <summary>Cycles charged but not yet handed to <see cref="OnCycle"/>.</summary>
+    private int _ticksOwed;
+
     /// <summary>Runs one instruction, or services a pending interrupt. Returns the cycles it cost.</summary>
     public int Step()
     {
         if (Jammed)
         {
-            Cycles++;
+            AddCycles(1);
+            DrainTicks();
             return 1;
         }
 
@@ -88,23 +101,100 @@ public sealed class Cpu6502(IBus bus)
         {
             _nmiPending = false;
             ServiceInterrupt(NmiVector);
-            return (int)(Cycles - start);
         }
-
-        if (_irqLine && (P & FlagInterruptDisable) == 0)
+        else if (_irqLine && (P & FlagInterruptDisable) == 0)
         {
             ServiceInterrupt(IrqVector);
-            return (int)(Cycles - start);
+        }
+        else
+        {
+            // The fetch is the instruction's first cycle, so it is owed before the
+            // table can say how many more there are.
+            _ticksOwed++;
+            byte opcode = Read(PC++);
+
+            OpcodeInfo info = OpcodeTable.Entries[opcode];
+            Cycles += info.Cycles;
+            _ticksOwed += info.Cycles - 1;
+
+            ushort address = Resolve(info.Mode, info.PageCross);
+            Execute(info.Op, info.Mode, address);
         }
 
-        byte opcode = _bus.Read(PC++);
-        OpcodeInfo info = OpcodeTable.Entries[opcode];
-        Cycles += info.Cycles;
-
-        ushort address = Resolve(info.Mode, info.PageCross);
-        Execute(info.Op, info.Mode, address);
+        // Whatever the instruction did not spend on the bus — internal cycles, and
+        // the ones this core does not model as dummy reads — is spent here.
+        DrainTicks();
 
         return (int)(Cycles - start);
+    }
+
+    private void AddCycles(int count)
+    {
+        Cycles += count;
+        _ticksOwed += count;
+    }
+
+    /// <summary>Hands one owed cycle to the rest of the console, before a bus access.</summary>
+    private void ConsumeTick()
+    {
+        if (_ticksOwed > 0)
+        {
+            _ticksOwed--;
+            OnCycle?.Invoke();
+        }
+    }
+
+    private void DrainTicks()
+    {
+        while (_ticksOwed > 0)
+        {
+            _ticksOwed--;
+            OnCycle?.Invoke();
+        }
+    }
+
+    private byte Read(ushort address)
+    {
+        ConsumeTick();
+        return _bus.Read(address);
+    }
+
+    private void Write(ushort address, byte value)
+    {
+        ConsumeTick();
+        _bus.Write(address, value);
+    }
+
+    // ----------------------------------------------------------- save states
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        writer.Write(A);
+        writer.Write(X);
+        writer.Write(Y);
+        writer.Write(S);
+        writer.Write(P);
+        writer.Write(PC);
+        writer.Write(Cycles);
+        writer.Write(Jammed);
+        writer.Write(_nmiPending);
+        writer.Write(_irqLine);
+        writer.Write(_baseAddress);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        A = reader.ReadByte();
+        X = reader.ReadByte();
+        Y = reader.ReadByte();
+        S = reader.ReadByte();
+        P = reader.ReadByte();
+        PC = reader.ReadUInt16();
+        Cycles = reader.ReadInt64();
+        Jammed = reader.ReadBoolean();
+        _nmiPending = reader.ReadBoolean();
+        _irqLine = reader.ReadBoolean();
+        _baseAddress = reader.ReadUInt16();
     }
 
     // ------------------------------------------------------------ addressing
@@ -121,17 +211,17 @@ public sealed class Cpu6502(IBus bus)
                 return PC++;
 
             case Am.ZeroPage:
-                return _bus.Read(PC++);
+                return Read(PC++);
 
             case Am.ZeroPageX:
-                return (byte)(_bus.Read(PC++) + X);
+                return (byte)(Read(PC++) + X);
 
             case Am.ZeroPageY:
-                return (byte)(_bus.Read(PC++) + Y);
+                return (byte)(Read(PC++) + Y);
 
             case Am.Relative:
             {
-                sbyte offset = (sbyte)_bus.Read(PC++);
+                sbyte offset = (sbyte)Read(PC++);
                 return (ushort)(PC + offset);
             }
 
@@ -149,7 +239,7 @@ public sealed class Cpu6502(IBus bus)
                 ushort address = (ushort)(_baseAddress + X);
                 if (pageCrossPenalty && CrossesPage(_baseAddress, address))
                 {
-                    Cycles++;
+                    AddCycles(1);
                 }
 
                 return address;
@@ -162,7 +252,7 @@ public sealed class Cpu6502(IBus bus)
                 ushort address = (ushort)(_baseAddress + Y);
                 if (pageCrossPenalty && CrossesPage(_baseAddress, address))
                 {
-                    Cycles++;
+                    AddCycles(1);
                 }
 
                 return address;
@@ -177,18 +267,18 @@ public sealed class Cpu6502(IBus bus)
 
             case Am.IndexedIndirect:
             {
-                byte pointer = (byte)(_bus.Read(PC++) + X);
+                byte pointer = (byte)(Read(PC++) + X);
                 return Read16ZeroPage(pointer);
             }
 
             case Am.IndirectIndexed:
             {
-                byte pointer = _bus.Read(PC++);
+                byte pointer = Read(PC++);
                 _baseAddress = Read16ZeroPage(pointer);
                 ushort address = (ushort)(_baseAddress + Y);
                 if (pageCrossPenalty && CrossesPage(_baseAddress, address))
                 {
-                    Cycles++;
+                    AddCycles(1);
                 }
 
                 return address;
@@ -200,11 +290,11 @@ public sealed class Cpu6502(IBus bus)
     }
 
     private ushort Read16(ushort address) =>
-        (ushort)(_bus.Read(address) | (_bus.Read((ushort)(address + 1)) << 8));
+        (ushort)(Read(address) | (Read((ushort)(address + 1)) << 8));
 
     /// <summary>Pointers in the zero page wrap inside it rather than spilling into $0100.</summary>
     private ushort Read16ZeroPage(byte address) =>
-        (ushort)(_bus.Read(address) | (_bus.Read((byte)(address + 1)) << 8));
+        (ushort)(Read(address) | (Read((byte)(address + 1)) << 8));
 
     /// <summary>
     /// The indirect jump bug. When the pointer ends at $xxFF the processor fetches
@@ -214,7 +304,7 @@ public sealed class Cpu6502(IBus bus)
     private ushort Read16Wrapped(ushort address)
     {
         ushort high = (ushort)((address & 0xFF00) | (byte)(address + 1));
-        return (ushort)(_bus.Read(address) | (_bus.Read(high) << 8));
+        return (ushort)(Read(address) | (Read(high) << 8));
     }
 
     private static bool CrossesPage(ushort from, ushort to) => (from & 0xFF00) != (to & 0xFF00);
@@ -225,12 +315,12 @@ public sealed class Cpu6502(IBus bus)
     {
         switch (op)
         {
-            case Op.ADC: Add(_bus.Read(address)); break;
-            case Op.SBC: Add((byte)(_bus.Read(address) ^ 0xFF)); break;
+            case Op.ADC: Add(Read(address)); break;
+            case Op.SBC: Add((byte)(Read(address) ^ 0xFF)); break;
 
-            case Op.AND: A &= _bus.Read(address); SetZeroNegative(A); break;
-            case Op.ORA: A |= _bus.Read(address); SetZeroNegative(A); break;
-            case Op.EOR: A ^= _bus.Read(address); SetZeroNegative(A); break;
+            case Op.AND: A &= Read(address); SetZeroNegative(A); break;
+            case Op.ORA: A |= Read(address); SetZeroNegative(A); break;
+            case Op.EOR: A ^= Read(address); SetZeroNegative(A); break;
 
             case Op.ASL:
                 if (mode == Am.Accumulator)
@@ -239,7 +329,7 @@ public sealed class Cpu6502(IBus bus)
                 }
                 else
                 {
-                    _bus.Write(address, ShiftLeft(ReadForModify(address)));
+                    Write(address, ShiftLeft(ReadForModify(address)));
                 }
 
                 break;
@@ -251,7 +341,7 @@ public sealed class Cpu6502(IBus bus)
                 }
                 else
                 {
-                    _bus.Write(address, ShiftRight(ReadForModify(address)));
+                    Write(address, ShiftRight(ReadForModify(address)));
                 }
 
                 break;
@@ -263,7 +353,7 @@ public sealed class Cpu6502(IBus bus)
                 }
                 else
                 {
-                    _bus.Write(address, RotateLeft(ReadForModify(address)));
+                    Write(address, RotateLeft(ReadForModify(address)));
                 }
 
                 break;
@@ -275,28 +365,28 @@ public sealed class Cpu6502(IBus bus)
                 }
                 else
                 {
-                    _bus.Write(address, RotateRight(ReadForModify(address)));
+                    Write(address, RotateRight(ReadForModify(address)));
                 }
 
                 break;
 
             case Op.BIT:
             {
-                byte value = _bus.Read(address);
+                byte value = Read(address);
                 SetFlag(FlagZero, (A & value) == 0);
                 SetFlag(FlagOverflow, (value & 0x40) != 0);
                 SetFlag(FlagNegative, (value & 0x80) != 0);
                 break;
             }
 
-            case Op.CMP: Compare(A, _bus.Read(address)); break;
-            case Op.CPX: Compare(X, _bus.Read(address)); break;
-            case Op.CPY: Compare(Y, _bus.Read(address)); break;
+            case Op.CMP: Compare(A, Read(address)); break;
+            case Op.CPX: Compare(X, Read(address)); break;
+            case Op.CPY: Compare(Y, Read(address)); break;
 
             case Op.DEC:
             {
                 byte value = (byte)(ReadForModify(address) - 1);
-                _bus.Write(address, value);
+                Write(address, value);
                 SetZeroNegative(value);
                 break;
             }
@@ -304,7 +394,7 @@ public sealed class Cpu6502(IBus bus)
             case Op.INC:
             {
                 byte value = (byte)(ReadForModify(address) + 1);
-                _bus.Write(address, value);
+                Write(address, value);
                 SetZeroNegative(value);
                 break;
             }
@@ -314,13 +404,13 @@ public sealed class Cpu6502(IBus bus)
             case Op.INX: X++; SetZeroNegative(X); break;
             case Op.INY: Y++; SetZeroNegative(Y); break;
 
-            case Op.LDA: A = _bus.Read(address); SetZeroNegative(A); break;
-            case Op.LDX: X = _bus.Read(address); SetZeroNegative(X); break;
-            case Op.LDY: Y = _bus.Read(address); SetZeroNegative(Y); break;
+            case Op.LDA: A = Read(address); SetZeroNegative(A); break;
+            case Op.LDX: X = Read(address); SetZeroNegative(X); break;
+            case Op.LDY: Y = Read(address); SetZeroNegative(Y); break;
 
-            case Op.STA: _bus.Write(address, A); break;
-            case Op.STX: _bus.Write(address, X); break;
-            case Op.STY: _bus.Write(address, Y); break;
+            case Op.STA: Write(address, A); break;
+            case Op.STX: Write(address, X); break;
+            case Op.STY: Write(address, Y); break;
 
             case Op.TAX: X = A; SetZeroNegative(X); break;
             case Op.TAY: Y = A; SetZeroNegative(Y); break;
@@ -379,7 +469,7 @@ public sealed class Cpu6502(IBus bus)
                 // why they can cost an extra cycle when indexing crosses a page.
                 if (mode != Am.Implied)
                 {
-                    _bus.Read(address);
+                    Read(address);
                 }
 
                 break;
@@ -389,7 +479,7 @@ public sealed class Cpu6502(IBus bus)
             case Op.SLO:
             {
                 byte value = ShiftLeft(ReadForModify(address));
-                _bus.Write(address, value);
+                Write(address, value);
                 A |= value;
                 SetZeroNegative(A);
                 break;
@@ -398,7 +488,7 @@ public sealed class Cpu6502(IBus bus)
             case Op.RLA:
             {
                 byte value = RotateLeft(ReadForModify(address));
-                _bus.Write(address, value);
+                Write(address, value);
                 A &= value;
                 SetZeroNegative(A);
                 break;
@@ -407,7 +497,7 @@ public sealed class Cpu6502(IBus bus)
             case Op.SRE:
             {
                 byte value = ShiftRight(ReadForModify(address));
-                _bus.Write(address, value);
+                Write(address, value);
                 A ^= value;
                 SetZeroNegative(A);
                 break;
@@ -416,15 +506,15 @@ public sealed class Cpu6502(IBus bus)
             case Op.RRA:
             {
                 byte value = RotateRight(ReadForModify(address));
-                _bus.Write(address, value);
+                Write(address, value);
                 Add(value);
                 break;
             }
 
-            case Op.SAX: _bus.Write(address, (byte)(A & X)); break;
+            case Op.SAX: Write(address, (byte)(A & X)); break;
 
             case Op.LAX:
-                A = _bus.Read(address);
+                A = Read(address);
                 X = A;
                 SetZeroNegative(A);
                 break;
@@ -432,7 +522,7 @@ public sealed class Cpu6502(IBus bus)
             case Op.DCP:
             {
                 byte value = (byte)(ReadForModify(address) - 1);
-                _bus.Write(address, value);
+                Write(address, value);
                 Compare(A, value);
                 break;
             }
@@ -440,24 +530,24 @@ public sealed class Cpu6502(IBus bus)
             case Op.ISC:
             {
                 byte value = (byte)(ReadForModify(address) + 1);
-                _bus.Write(address, value);
+                Write(address, value);
                 Add((byte)(value ^ 0xFF));
                 break;
             }
 
             case Op.ANC:
-                A &= _bus.Read(address);
+                A &= Read(address);
                 SetZeroNegative(A);
                 SetFlag(FlagCarry, (A & 0x80) != 0);
                 break;
 
             case Op.ALR:
-                A &= _bus.Read(address);
+                A &= Read(address);
                 A = ShiftRight(A);
                 break;
 
             case Op.ARR:
-                A &= _bus.Read(address);
+                A &= Read(address);
                 A = (byte)((A >> 1) | ((P & FlagCarry) << 7));
                 SetZeroNegative(A);
                 SetFlag(FlagCarry, (A & 0x40) != 0);
@@ -466,7 +556,7 @@ public sealed class Cpu6502(IBus bus)
 
             case Op.AXS:
             {
-                byte value = _bus.Read(address);
+                byte value = Read(address);
                 byte and = (byte)(A & X);
                 SetFlag(FlagCarry, and >= value);
                 X = (byte)(and - value);
@@ -477,13 +567,13 @@ public sealed class Cpu6502(IBus bus)
             case Op.XAA:
                 // Genuinely unstable on hardware: the result depends on analog decay
                 // in the accumulator. This is the behaviour most test ROMs assume.
-                A = (byte)(X & _bus.Read(address));
+                A = (byte)(X & Read(address));
                 SetZeroNegative(A);
                 break;
 
             case Op.LAS:
             {
-                byte value = (byte)(_bus.Read(address) & S);
+                byte value = (byte)(Read(address) & S);
                 A = value;
                 X = value;
                 S = value;
@@ -493,13 +583,13 @@ public sealed class Cpu6502(IBus bus)
 
             // The stores below drop the high byte of the target address into the
             // value being written, because the address bus is still driving it.
-            case Op.AHX: _bus.Write(address, (byte)(A & X & HighByteMask())); break;
-            case Op.SHY: _bus.Write(address, (byte)(Y & HighByteMask())); break;
-            case Op.SHX: _bus.Write(address, (byte)(X & HighByteMask())); break;
+            case Op.AHX: Write(address, (byte)(A & X & HighByteMask())); break;
+            case Op.SHY: Write(address, (byte)(Y & HighByteMask())); break;
+            case Op.SHX: Write(address, (byte)(X & HighByteMask())); break;
 
             case Op.TAS:
                 S = (byte)(A & X);
-                _bus.Write(address, (byte)(S & HighByteMask()));
+                Write(address, (byte)(S & HighByteMask()));
                 break;
 
             case Op.JAM:
@@ -523,8 +613,8 @@ public sealed class Cpu6502(IBus bus)
     /// </summary>
     private byte ReadForModify(ushort address)
     {
-        byte value = _bus.Read(address);
-        _bus.Write(address, value);
+        byte value = Read(address);
+        Write(address, value);
         return value;
     }
 
@@ -585,10 +675,10 @@ public sealed class Cpu6502(IBus bus)
             return;
         }
 
-        Cycles++;
+        AddCycles(1);
         if (CrossesPage(PC, target))
         {
-            Cycles++;
+            AddCycles(1);
         }
 
         PC = target;
@@ -600,19 +690,19 @@ public sealed class Cpu6502(IBus bus)
         Push((byte)((P | FlagUnused) & ~FlagBreak));
         SetFlag(FlagInterruptDisable, true);
         PC = Read16(vector);
-        Cycles += 7;
+        AddCycles(7);
     }
 
     private void Push(byte value)
     {
-        _bus.Write((ushort)(StackBase + S), value);
+        Write((ushort)(StackBase + S), value);
         S--;
     }
 
     private byte Pull()
     {
         S++;
-        return _bus.Read((ushort)(StackBase + S));
+        return Read((ushort)(StackBase + S));
     }
 
     private void Push16(ushort value)

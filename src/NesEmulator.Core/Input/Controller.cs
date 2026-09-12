@@ -53,4 +53,18 @@ public sealed class Controller
         // which on this console reads back as $40.
         return (byte)(bit | 0x40);
     }
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        writer.Write((byte)Buttons);
+        writer.Write(_shiftRegister);
+        writer.Write(_strobe);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        Buttons = (NesButton)reader.ReadByte();
+        _shiftRegister = reader.ReadByte();
+        _strobe = reader.ReadBoolean();
+    }
 }

@@ -84,4 +84,28 @@ public sealed class TriangleChannel
     }
 
     public int Output() => Steps[_sequence];
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        Length.SaveState(writer);
+        writer.Write(_sequence);
+        writer.Write(_timer);
+        writer.Write(_timerPeriod);
+        writer.Write(_control);
+        writer.Write(_linearReload);
+        writer.Write(_linearPeriod);
+        writer.Write(_linearCounter);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        Length.LoadState(reader);
+        _sequence = reader.ReadInt32();
+        _timer = reader.ReadInt32();
+        _timerPeriod = reader.ReadInt32();
+        _control = reader.ReadBoolean();
+        _linearReload = reader.ReadBoolean();
+        _linearPeriod = reader.ReadInt32();
+        _linearCounter = reader.ReadInt32();
+    }
 }

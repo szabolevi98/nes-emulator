@@ -330,4 +330,37 @@ public sealed class Apu2A03
         _writeIndex = (_writeIndex + 1) % _samples.Length;
         _bufferedCount++;
     }
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        Pulse1.SaveState(writer);
+        Pulse2.SaveState(writer);
+        Triangle.SaveState(writer);
+        Noise.SaveState(writer);
+        Dmc.SaveState(writer);
+        writer.Write(_cycle);
+        writer.Write(_frameCounter);
+        writer.Write(_fiveStepMode);
+        writer.Write(_frameIrqDisabled);
+        writer.Write(_frameIrqPending);
+        writer.Write(_sampleCounter);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        Pulse1.LoadState(reader);
+        Pulse2.LoadState(reader);
+        Triangle.LoadState(reader);
+        Noise.LoadState(reader);
+        Dmc.LoadState(reader);
+        _cycle = reader.ReadInt64();
+        _frameCounter = reader.ReadInt32();
+        _fiveStepMode = reader.ReadBoolean();
+        _frameIrqDisabled = reader.ReadBoolean();
+        _frameIrqPending = reader.ReadBoolean();
+        _sampleCounter = reader.ReadDouble();
+
+        // Samples already queued belong to the moment that was left behind.
+        DiscardSamples();
+    }
 }

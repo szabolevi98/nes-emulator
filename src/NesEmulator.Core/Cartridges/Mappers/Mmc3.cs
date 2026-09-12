@@ -202,4 +202,30 @@ public sealed class Mmc3 : IMapper
             _cartridge.Chr[ChrOffset(address)] = value;
         }
     }
+
+    public void SaveState(BinaryWriter writer)
+    {
+        writer.Write(_prgRam);
+        writer.Write(_banks);
+        writer.Write(_bankSelect);
+        writer.Write((int)_mirroring);
+        writer.Write(_irqLatch);
+        writer.Write(_irqCounter);
+        writer.Write(_irqReload);
+        writer.Write(_irqEnabled);
+        writer.Write(_irqPending);
+    }
+
+    public void LoadState(BinaryReader reader)
+    {
+        reader.ReadExactly(_prgRam);
+        reader.ReadExactly(_banks);
+        _bankSelect = reader.ReadByte();
+        _mirroring = (Mirroring)reader.ReadInt32();
+        _irqLatch = reader.ReadByte();
+        _irqCounter = reader.ReadByte();
+        _irqReload = reader.ReadBoolean();
+        _irqEnabled = reader.ReadBoolean();
+        _irqPending = reader.ReadBoolean();
+    }
 }

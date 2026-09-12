@@ -138,4 +138,24 @@ public sealed class Mmc1 : IMapper
             _cartridge.Chr[ChrOffset(address)] = value;
         }
     }
+
+    public void SaveState(BinaryWriter writer)
+    {
+        writer.Write(_prgRam);
+        writer.Write(_shiftRegister);
+        writer.Write(_control);
+        writer.Write(_chrBank0);
+        writer.Write(_chrBank1);
+        writer.Write(_prgBank);
+    }
+
+    public void LoadState(BinaryReader reader)
+    {
+        reader.ReadExactly(_prgRam);
+        _shiftRegister = reader.ReadByte();
+        _control = reader.ReadByte();
+        _chrBank0 = reader.ReadByte();
+        _chrBank1 = reader.ReadByte();
+        _prgBank = reader.ReadByte();
+    }
 }

@@ -1385,6 +1385,182 @@ Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
         $"pc {nes.Cpu.PC:X4}");
 }
 
+// ------------------------------------------------------------- save states
+
+// A cartridge that keeps busy: it walks a counter through work RAM forever.
+byte[] BuildBusyRom()
+{
+    byte[] image = BuildRom(1, 1);
+    byte[] program =
+    [
+        0xA9, 0x00, 0x85, 0x10,        // LDA #$00; STA $10
+        0xE6, 0x10,                    // INC $10
+        0xA5, 0x10, 0x8D, 0x00, 0x02,  // LDA $10; STA $0200
+        0x4C, 0x04, 0xC0,              // JMP back to the INC
+    ];
+
+    program.CopyTo(image, 16);
+    image[16 + 0x3FFC] = 0x00;
+    image[16 + 0x3FFD] = 0xC0;
+    return image;
+}
+
+{
+    Nes nes = new(Cartridge.FromBytes(BuildBusyRom()));
+    for (int i = 0; i < 5000; i++)
+    {
+        nes.StepInstruction();
+    }
+
+    MemoryStream state = new();
+    nes.SaveState(state);
+
+    long cycles = nes.Cpu.Cycles;
+    byte a = nes.Cpu.A;
+    ushort pc = nes.Cpu.PC;
+    byte counter = nes.Bus.Read(0x0010);
+
+    for (int i = 0; i < 5000; i++)
+    {
+        nes.StepInstruction();
+    }
+
+    Check("state: the console moved on after saving",
+        nes.Cpu.Cycles != cycles && nes.Bus.Read(0x0010) != counter);
+
+    state.Position = 0;
+    nes.LoadState(state);
+
+    Check("state: restores the register file",
+        nes.Cpu.A == a && nes.Cpu.PC == pc, $"A={nes.Cpu.A:X2} PC={nes.Cpu.PC:X4}");
+    Check("state: restores the cycle count", nes.Cpu.Cycles == cycles,
+        $"got {nes.Cpu.Cycles} wanted {cycles}");
+    Check("state: restores work RAM", nes.Bus.Read(0x0010) == counter,
+        $"got {nes.Bus.Read(0x0010):X2} wanted {counter:X2}");
+}
+
+{
+    // Running on from a restored state has to give exactly the same result twice.
+    Nes nes = new(Cartridge.FromBytes(BuildBusyRom()));
+    for (int i = 0; i < 2000; i++)
+    {
+        nes.StepInstruction();
+    }
+
+    MemoryStream state = new();
+    nes.SaveState(state);
+
+    for (int frame = 0; frame < 5; frame++)
+    {
+        nes.RunFrame();
+    }
+
+    byte[] first = nes.Ppu.FrameBuffer.ToArray();
+    long firstCycles = nes.Cpu.Cycles;
+
+    state.Position = 0;
+    nes.LoadState(state);
+    for (int frame = 0; frame < 5; frame++)
+    {
+        nes.RunFrame();
+    }
+
+    Check("state: replaying from a state is deterministic",
+        nes.Cpu.Cycles == firstCycles && nes.Ppu.FrameBuffer.SequenceEqual(first),
+        $"cycles {nes.Cpu.Cycles} against {firstCycles}");
+}
+
+{
+    // A state written by a different cartridge must be refused, not misread.
+    Nes source = new(Cartridge.FromBytes(BuildRom(4, 1, 0x20))); // mapper 2
+    MemoryStream state = new();
+    source.SaveState(state);
+
+    Nes other = new(Cartridge.FromBytes(BuildBusyRom()));        // mapper 0
+    state.Position = 0;
+
+    bool threw = false;
+    try
+    {
+        other.LoadState(state);
+    }
+    catch (InvalidDataException)
+    {
+        threw = true;
+    }
+
+    Check("state: refuses a state from another cartridge", threw);
+}
+
+{
+    Nes nes = new(Cartridge.FromBytes(BuildBusyRom()));
+    bool threw = false;
+    try
+    {
+        nes.LoadState(new MemoryStream([1, 2, 3, 4, 5, 6, 7, 8]));
+    }
+    catch (Exception exception) when (exception is InvalidDataException or EndOfStreamException)
+    {
+        threw = true;
+    }
+
+    Check("state: refuses something that is not a state at all", threw);
+}
+
+// ----------------------------------------------------------------- rewinding
+
+{
+    Nes nes = new(Cartridge.FromBytes(BuildBusyRom()));
+    RewindBuffer rewind = new(nes, capacity: 20, framesBetween: 2);
+
+    for (int frame = 0; frame < 20; frame++)
+    {
+        nes.RunFrame();
+        rewind.OnFrame();
+    }
+
+    Check("rewind: keeps one snapshot every few frames", rewind.Count == 10,
+        $"got {rewind.Count}");
+
+    // Compression matters here: a state is about seventy kilobytes raw.
+    long average = rewind.BytesHeld / Math.Max(1, rewind.Count);
+    Check("rewind: snapshots compress to a fraction of their size", average < 20_000,
+        $"average {average} bytes");
+
+    long cycles = nes.Cpu.Cycles;
+    Check("rewind: winding back moves the console into the past",
+        rewind.StepBack() && nes.Cpu.Cycles < cycles,
+        $"{nes.Cpu.Cycles} against {cycles}");
+
+    Check("rewind: taking a snapshot back removes it", rewind.Count == 9,
+        $"got {rewind.Count}");
+
+    while (rewind.StepBack())
+    {
+        // wind all the way back
+    }
+
+    Check("rewind: runs out at the oldest snapshot", rewind.Count == 0 && !rewind.StepBack());
+}
+
+{
+    // The ring must not grow without bound.
+    Nes nes = new(Cartridge.FromBytes(BuildBusyRom()));
+    RewindBuffer rewind = new(nes, capacity: 5, framesBetween: 1);
+
+    for (int frame = 0; frame < 40; frame++)
+    {
+        nes.RunFrame();
+        rewind.OnFrame();
+    }
+
+    Check("rewind: the ring is capped at its capacity", rewind.Count == 5,
+        $"got {rewind.Count}");
+
+    rewind.Clear();
+    Check("rewind: clearing empties it", rewind.Count == 0 && !rewind.StepBack());
+}
+
 // ------------------------------------------------------------------ summary
 
 Console.WriteLine();

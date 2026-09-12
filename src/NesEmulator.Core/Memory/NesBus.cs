@@ -154,4 +154,18 @@ public sealed class NesBus(
 
         return _mapper.CpuRead(address);
     }
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        writer.Write(_ram);
+        writer.Write(_openBus);
+        writer.Write(PendingDmaCycles);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        reader.ReadExactly(_ram);
+        _openBus = reader.ReadByte();
+        PendingDmaCycles = reader.ReadInt32();
+    }
 }

@@ -19,4 +19,9 @@
     <InternalsVisibleTo Include="NesEmulator.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- StateIo extends BinaryReader for every component that saves state. -->
+    <Using Include="NesEmulator.Core" />
+  </ItemGroup>
+
 </Project>

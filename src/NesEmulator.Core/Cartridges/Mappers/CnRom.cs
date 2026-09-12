@@ -62,4 +62,16 @@ public sealed class CnRom : IMapper
             _cartridge.Chr[(_bank * Cartridge.ChrBankSize) + (address & 0x1FFF)] = value;
         }
     }
+
+    public void SaveState(BinaryWriter writer)
+    {
+        writer.Write(_prgRam);
+        writer.Write(_bank);
+    }
+
+    public void LoadState(BinaryReader reader)
+    {
+        reader.ReadExactly(_prgRam);
+        _bank = reader.ReadInt32();
+    }
 }

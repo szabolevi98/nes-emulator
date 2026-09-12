@@ -129,6 +129,81 @@ public sealed class Ppu2C02
 
     private bool ShowSprites => (_mask & 0x10) != 0;
 
+    // ----------------------------------------------------------- save states
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        writer.Write(_vram);
+        writer.Write(_paletteRam);
+        writer.Write(_oam);
+        writer.Write(_ctrl);
+        writer.Write(_mask);
+        writer.Write(_status);
+        writer.Write(_oamAddress);
+        writer.Write(_v);
+        writer.Write(_t);
+        writer.Write(_fineX);
+        writer.Write(_writeLatch);
+        writer.Write(_readBuffer);
+        writer.Write(_nameTableByte);
+        writer.Write(_attributeByte);
+        writer.Write(_patternLow);
+        writer.Write(_patternHigh);
+        writer.Write(_patternShiftLow);
+        writer.Write(_patternShiftHigh);
+        writer.Write(_attributeShiftLow);
+        writer.Write(_attributeShiftHigh);
+        writer.Write(_lineSprites);
+        writer.Write(_spriteShiftLow);
+        writer.Write(_spriteShiftHigh);
+        writer.Write(_lineSpriteCount);
+        writer.Write(_spriteZeroOnLine);
+        writer.Write(_oddFrame);
+        writer.Write(_nmiPending);
+        writer.Write(Scanline);
+        writer.Write(Cycle);
+        writer.Write(FrameCount);
+        writer.Write(FrameBuffer);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        reader.ReadExactly(_vram);
+        reader.ReadExactly(_paletteRam);
+        reader.ReadExactly(_oam);
+        _ctrl = reader.ReadByte();
+        _mask = reader.ReadByte();
+        _status = reader.ReadByte();
+        _oamAddress = reader.ReadByte();
+        _v = reader.ReadUInt16();
+        _t = reader.ReadUInt16();
+        _fineX = reader.ReadByte();
+        _writeLatch = reader.ReadBoolean();
+        _readBuffer = reader.ReadByte();
+        _nameTableByte = reader.ReadByte();
+        _attributeByte = reader.ReadByte();
+        _patternLow = reader.ReadByte();
+        _patternHigh = reader.ReadByte();
+        _patternShiftLow = reader.ReadUInt16();
+        _patternShiftHigh = reader.ReadUInt16();
+        _attributeShiftLow = reader.ReadUInt16();
+        _attributeShiftHigh = reader.ReadUInt16();
+        reader.ReadExactly(_lineSprites);
+        reader.ReadExactly(_spriteShiftLow);
+        reader.ReadExactly(_spriteShiftHigh);
+        _lineSpriteCount = reader.ReadInt32();
+        _spriteZeroOnLine = reader.ReadBoolean();
+        _oddFrame = reader.ReadBoolean();
+        _nmiPending = reader.ReadBoolean();
+        Scanline = reader.ReadInt32();
+        Cycle = reader.ReadInt32();
+        FrameCount = reader.ReadInt64();
+
+        // The picture is part of the state so that loading mid-frame does not show
+        // half of the old one and half of the new.
+        reader.ReadExactly(FrameBuffer);
+    }
+
     // ------------------------------------------------------ processor facing
 
     /// <summary>The eight registers at $2000, as the processor sees them.</summary>

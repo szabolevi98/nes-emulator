@@ -71,4 +71,24 @@ public sealed class NoiseChannel
 
         return Envelope.Output;
     }
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        Length.SaveState(writer);
+        Envelope.SaveState(writer);
+        writer.Write(_shiftRegister);
+        writer.Write(_timer);
+        writer.Write(_timerPeriod);
+        writer.Write(_shortMode);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        Length.LoadState(reader);
+        Envelope.LoadState(reader);
+        _shiftRegister = reader.ReadInt32();
+        _timer = reader.ReadInt32();
+        _timerPeriod = reader.ReadInt32();
+        _shortMode = reader.ReadBoolean();
+    }
 }

@@ -39,6 +39,20 @@ public sealed class LengthCounter
     }
 
     public void Disable() => Value = 0;
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        writer.Write(Enabled);
+        writer.Write(Halted);
+        writer.Write(Value);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        Enabled = reader.ReadBoolean();
+        Halted = reader.ReadBoolean();
+        Value = reader.ReadByte();
+    }
 }
 
 /// <summary>
@@ -89,5 +103,25 @@ public sealed class Envelope
         {
             _decay = 15;
         }
+    }
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        writer.Write(Loop);
+        writer.Write(ConstantVolume);
+        writer.Write(Volume);
+        writer.Write(_start);
+        writer.Write(_divider);
+        writer.Write(_decay);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        Loop = reader.ReadBoolean();
+        ConstantVolume = reader.ReadBoolean();
+        Volume = reader.ReadInt32();
+        _start = reader.ReadBoolean();
+        _divider = reader.ReadInt32();
+        _decay = reader.ReadInt32();
     }
 }

@@ -56,4 +56,8 @@ public sealed class Nrom : IMapper
             _cartridge.Chr[address & 0x1FFF] = value;
         }
     }
+
+    public void SaveState(BinaryWriter writer) => writer.Write(_prgRam);
+
+    public void LoadState(BinaryReader reader) => reader.ReadExactly(_prgRam);
 }

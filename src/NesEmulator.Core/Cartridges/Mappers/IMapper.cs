@@ -43,4 +43,16 @@ public interface IMapper
         _ => throw new NotSupportedException(
             $"Mapper {cartridge.MapperNumber} is not implemented yet."),
     };
+
+    /// <summary>
+    /// Writes whatever the board is holding: bank registers, counters, save RAM.
+    /// A board with no state of its own can leave both of these alone.
+    /// </summary>
+    void SaveState(BinaryWriter writer)
+    {
+    }
+
+    void LoadState(BinaryReader reader)
+    {
+    }
 }

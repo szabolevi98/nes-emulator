@@ -148,4 +148,38 @@ public sealed class DmcChannel
     }
 
     public int Output() => OutputLevel;
+
+    internal void SaveState(BinaryWriter writer)
+    {
+        writer.Write(_timer);
+        writer.Write(_timerPeriod);
+        writer.Write(_irqEnabled);
+        writer.Write(_loop);
+        writer.Write(_sampleAddress);
+        writer.Write(_sampleLength);
+        writer.Write(_currentAddress);
+        writer.Write(_bytesRemaining);
+        writer.Write(_shiftRegister);
+        writer.Write(_bitsRemaining);
+        writer.Write(_silence);
+        writer.Write(OutputLevel);
+        writer.Write(IrqPending);
+    }
+
+    internal void LoadState(BinaryReader reader)
+    {
+        _timer = reader.ReadInt32();
+        _timerPeriod = reader.ReadInt32();
+        _irqEnabled = reader.ReadBoolean();
+        _loop = reader.ReadBoolean();
+        _sampleAddress = reader.ReadUInt16();
+        _sampleLength = reader.ReadInt32();
+        _currentAddress = reader.ReadUInt16();
+        _bytesRemaining = reader.ReadInt32();
+        _shiftRegister = reader.ReadByte();
+        _bitsRemaining = reader.ReadInt32();
+        _silence = reader.ReadBoolean();
+        OutputLevel = reader.ReadInt32();
+        IrqPending = reader.ReadBoolean();
+    }
 }
