@@ -12,7 +12,7 @@ namespace NesEmulator;
 /// beside it. The debugger is the same trace view the processor was built
 /// against, which is the window you want open the moment a game misbehaves.
 /// </summary>
-public sealed class MainForm : Form
+public sealed class MainForm : Form, IMessageFilter
 {
     private static readonly Color Background = Color.FromArgb(24, 24, 27);
     private static readonly Color Surface = Color.FromArgb(32, 32, 36);
@@ -65,6 +65,7 @@ public sealed class MainForm : Form
     private bool _rewinding;
     private int _rewindTicks;
     private bool _running;
+    private bool _menuActive;
     private int _framesSinceCount;
     private double _lastFpsReport;
     private double _fps;
@@ -86,7 +87,6 @@ public sealed class MainForm : Form
         MinimumSize = new Size(640, 480);
         Size = new Size(1024, 720);
         StartPosition = FormStartPosition.CenterScreen;
-        KeyPreview = true;
 
         _screen = new ScreenControl { Dock = DockStyle.Fill };
 
@@ -236,6 +236,12 @@ public sealed class MainForm : Form
         Controls.Add(_summary);
         Controls.Add(menu);
         MainMenuStrip = menu;
+        menu.MenuActivate += (_, _) =>
+        {
+            _menuActive = true;
+            ReleaseControllerInput();
+        };
+        menu.MenuDeactivate += (_, _) => _menuActive = false;
 
         AllowDrop = true;
         DragEnter += (_, e) => e.Effect = e.Data?.GetDataPresent(DataFormats.FileDrop) == true
@@ -258,6 +264,8 @@ public sealed class MainForm : Form
         {
             LoadRom(romPath);
         }
+
+        Application.AddMessageFilter(this);
     }
 
     private void ShowAbout() => ShowHelpDialog(() => new AboutForm());
@@ -266,13 +274,7 @@ public sealed class MainForm : Form
     {
         bool resume = _running;
         if (resume) Stop();
-        _rewinding = false;
-        _rewindTicks = 0;
-        if (_nes is not null)
-        {
-            _nes.Port1.Buttons = 0;
-            _nes.Port2.Buttons = 0;
-        }
+        ReleaseControllerInput();
 
         try
         {
@@ -609,63 +611,86 @@ public sealed class MainForm : Form
         return new string(text);
     }
 
-    protected override void OnKeyDown(KeyEventArgs e)
+    /// <summary>
+    /// Capture controller keys before WinForms treats arrows and Enter as focus
+    /// navigation or a button click. KeyPreview runs too late for those messages.
+    /// Only this window participates; menus and modal dialogs keep their keys.
+    /// </summary>
+    public bool PreFilterMessage(ref Message m)
     {
-        if (e.KeyCode == Keys.Back && _rewind is not null)
+        const int KeyDown = 0x0100, KeyUp = 0x0101;
+        const int SysKeyDown = 0x0104, SysKeyUp = 0x0105;
+        if (m.Msg is not (KeyDown or KeyUp or SysKeyDown or SysKeyUp)
+            || !Enabled || _menuActive || _nes is null
+            || Control.FromChildHandle(m.HWnd)?.FindForm() != this)
         {
-            _rewinding = true;
-            e.Handled = true;
+            return false;
         }
 
-        if (_nes is not null && KeyMap.TryGetValue(e.KeyCode, out NesButton button))
+        bool pressed = m.Msg is KeyDown or SysKeyDown;
+        // Shift is also Select, so Shift + an arrow must still reach the game.
+        // Ctrl/Alt combinations belong to the application (Ctrl+R, Alt+F4, ...).
+        if (pressed && ((ModifierKeys & (Keys.Control | Keys.Alt)) != 0 || m.Msg == SysKeyDown))
         {
-            _nes.Port1.Buttons |= button;
-            e.Handled = true;
+            return false;
         }
 
-        if (_nes is not null && KeyMap2.TryGetValue(e.KeyCode, out NesButton second))
+        Keys key = (Keys)(int)m.WParam & Keys.KeyCode;
+        if (key == Keys.Back && _rewind is not null)
         {
-            _nes.Port2.Buttons |= second;
-            e.Handled = true;
+            if (pressed) _rewinding = true;
+            else EndRewind();
+            return true;
         }
 
-        base.OnKeyDown(e);
+        bool handled = false;
+        if (KeyMap.TryGetValue(key, out NesButton button))
+        {
+            if (pressed) _nes.Port1.Buttons |= button;
+            else _nes.Port1.Buttons &= ~button;
+            handled = true;
+        }
+
+        if (KeyMap2.TryGetValue(key, out NesButton second))
+        {
+            if (pressed) _nes.Port2.Buttons |= second;
+            else _nes.Port2.Buttons &= ~second;
+            handled = true;
+        }
+
+        return handled;
     }
 
-    protected override void OnKeyUp(KeyEventArgs e)
+    private void EndRewind()
     {
-        if (e.KeyCode == Keys.Back)
-        {
-            _rewinding = false;
-            _rewindTicks = 0;
-            _nes?.Apu.DiscardSamples();
-            _pacer.Reset(_stopwatch.Elapsed.TotalSeconds);
-            e.Handled = true;
-        }
-
-        if (_nes is not null && KeyMap.TryGetValue(e.KeyCode, out NesButton button))
-        {
-            _nes.Port1.Buttons &= ~button;
-            e.Handled = true;
-        }
-
-        if (_nes is not null && KeyMap2.TryGetValue(e.KeyCode, out NesButton second))
-        {
-            _nes.Port2.Buttons &= ~second;
-            e.Handled = true;
-        }
-
-        base.OnKeyUp(e);
+        if (!_rewinding) return;
+        _rewinding = false;
+        _rewindTicks = 0;
+        _nes?.Apu.DiscardSamples();
+        _pacer.Reset(_stopwatch.Elapsed.TotalSeconds);
     }
 
-    /// <summary>The arrow keys would otherwise move focus between controls.</summary>
-    protected override bool IsInputKey(Keys keyData) =>
-        KeyMap.ContainsKey(keyData) || KeyMap2.ContainsKey(keyData) || base.IsInputKey(keyData);
+    private void ReleaseControllerInput()
+    {
+        EndRewind();
+        if (_nes is not null)
+        {
+            _nes.Port1.Buttons = 0;
+            _nes.Port2.Buttons = 0;
+        }
+    }
+
+    protected override void OnDeactivate(EventArgs e)
+    {
+        ReleaseControllerInput();
+        base.OnDeactivate(e);
+    }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            Application.RemoveMessageFilter(this);
             _clock.Dispose();
             _audio?.Dispose();
             _windowIcon.Dispose();

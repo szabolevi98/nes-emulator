@@ -131,8 +131,8 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 
 | | |
 |---|---|
-| Player one | Arrows, X and Z, Enter and Shift |
-| Player two | WASD, G and F, R and T |
+| Player one | Arrows = directions, X = A, Z = B, Enter = Start, Shift = Select |
+| Player two | WASD = directions, G = A, F = B, R = Start, T = Select |
 | Save / load state | F1 / F4 |
 | Rewind | Hold Backspace |
 | Pause | F5 |
@@ -143,6 +143,14 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 The debugger panel folds out beside the screen and shows the register file, the beam position and the same instruction trace the processor was built against.
 
 **Help → Controls** shows both players' key bindings and the emulator shortcuts. Opening Controls or About pauses the game and restores its previous running state when the dialog closes.
+
+Controller keys work even when a debugger control has focus. Menus and dialogs keep their normal keyboard navigation; switching away from the emulator releases both controllers to prevent stuck buttons. Ctrl/Alt shortcuts do not press controller buttons.
+
+The Windows input regression checks run without opening a window or loading a commercial ROM:
+
+```powershell
+dotnet run -c Release --project tests/NesEmulator.UiTests
+```
 
 ## Release build
 
@@ -170,6 +178,7 @@ NesEmulator.exe roms\demo.nes
   - `Input/` — the controllers
 - `src/NesEmulator/` — the Windows Forms shell and the wave output
 - `tests/NesEmulator.Tests/` — the console test runner
+- `tests/NesEmulator.UiTests/` — Windows keyboard routing and focus regression checks
 - `tools/` — the demo cartridge generator
 
 `Cpu/OpcodeTable.cs` holds all 256 entries written out in full, four to a line, so a row matches a row of the published opcode matrix and can be checked against it by eye. Writing it as data rather than as a switch is also what makes the disassembler nearly free.
