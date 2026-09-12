@@ -125,3 +125,16 @@ public sealed class Envelope
         _decay = reader.ReadInt32();
     }
 }
+
+/// <summary>Which of the five channels are allowed to reach the mixer.</summary>
+[Flags]
+public enum ApuChannels : byte
+{
+    None = 0,
+    Pulse1 = 1,
+    Pulse2 = 2,
+    Triangle = 4,
+    Noise = 8,
+    Dmc = 16,
+    All = Pulse1 | Pulse2 | Triangle | Noise | Dmc,
+}

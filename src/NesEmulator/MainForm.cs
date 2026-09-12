@@ -2,6 +2,7 @@ using System.Diagnostics;
 using NesEmulator.Audio;
 using NesEmulator.Controls;
 using NesEmulator.Core;
+using NesEmulator.Core.Apu;
 using NesEmulator.Core.Cpu;
 using NesEmulator.Core.Input;
 
@@ -209,6 +210,7 @@ public sealed class MainForm : Form, IMessageFilter
         });
         emulation.DropDownItems.Add(new ToolStripSeparator());
         emulation.DropDownItems.Add(_soundItem);
+        emulation.DropDownItems.Add(BuildChannelMenu());
 
         ToolStripMenuItem view = new("&View");
         ToolStripMenuItem debuggerItem = new("&Debugger", null, (sender, _) =>
@@ -529,6 +531,43 @@ public sealed class MainForm : Form, IMessageFilter
     {
         _summary.ForeColor = warning ? Warning : Muted;
         _summary.Text = message;
+    }
+
+    /// <summary>
+    /// A tick box per sound channel. Silencing one does not change what it is
+    /// doing, so this is safe mid-game and is the quickest way to hear which
+    /// channel a problem belongs to.
+    /// </summary>
+    private ToolStripMenuItem BuildChannelMenu()
+    {
+        ToolStripMenuItem channels = new("&Channels");
+
+        foreach ((string name, ApuChannels flag) in new[]
+        {
+            ("Square &1", ApuChannels.Pulse1),
+            ("Square &2", ApuChannels.Pulse2),
+            ("&Triangle", ApuChannels.Triangle),
+            ("&Noise", ApuChannels.Noise),
+            ("&Sample (DMC)", ApuChannels.Dmc),
+        })
+        {
+            ToolStripMenuItem item = new(name) { Checked = true, CheckOnClick = true };
+            item.CheckedChanged += (_, _) =>
+            {
+                if (_nes is null)
+                {
+                    return;
+                }
+
+                _nes.Apu.EnabledChannels = item.Checked
+                    ? _nes.Apu.EnabledChannels | flag
+                    : _nes.Apu.EnabledChannels & ~flag;
+            };
+
+            channels.DropDownItems.Add(item);
+        }
+
+        return channels;
     }
 
     private void PlayAudio()

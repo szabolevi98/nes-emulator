@@ -294,11 +294,22 @@ public sealed class Apu2A03
 
     // ----------------------------------------------------------------- mixer
 
+    /// <summary>
+    /// Which channels reach the mixer. Silencing one does not change what it is
+    /// doing — its timers, counters and interrupts run as before — so muting is
+    /// safe mid-game and is the quickest way to hear which channel is at fault.
+    /// </summary>
+    public ApuChannels EnabledChannels { get; set; } = ApuChannels.All;
+
     private float Mix()
     {
-        int pulses = Pulse1.Output() + Pulse2.Output();
-        int tnd = (3 * Triangle.Output()) + (2 * Noise.Output()) + Dmc.Output();
-        return PulseMix[pulses] + TndMix[tnd];
+        int pulse1 = (EnabledChannels & ApuChannels.Pulse1) != 0 ? Pulse1.Output() : 0;
+        int pulse2 = (EnabledChannels & ApuChannels.Pulse2) != 0 ? Pulse2.Output() : 0;
+        int triangle = (EnabledChannels & ApuChannels.Triangle) != 0 ? Triangle.Output() : 0;
+        int noise = (EnabledChannels & ApuChannels.Noise) != 0 ? Noise.Output() : 0;
+        int dmc = (EnabledChannels & ApuChannels.Dmc) != 0 ? Dmc.Output() : 0;
+
+        return PulseMix[pulse1 + pulse2] + TndMix[(3 * triangle) + (2 * noise) + dmc];
     }
 
     private static float[] BuildPulseMix()
