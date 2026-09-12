@@ -24,6 +24,9 @@ public interface IMapper
     static IMapper Create(Cartridge cartridge) => cartridge.MapperNumber switch
     {
         0 => new Nrom(cartridge),
+        1 => new Mmc1(cartridge),
+        2 => new UxRom(cartridge),
+        3 => new CnRom(cartridge),
         _ => throw new NotSupportedException(
             $"Mapper {cartridge.MapperNumber} is not implemented yet."),
     };

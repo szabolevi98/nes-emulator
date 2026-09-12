@@ -2,7 +2,9 @@ using NesEmulator.Core;
 using NesEmulator.Core.Cartridges;
 using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Cpu;
+using NesEmulator.Core.Input;
 using NesEmulator.Core.Memory;
+using NesEmulator.Core.Ppu;
 
 int failures = 0;
 int total = 0;
@@ -610,7 +612,7 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
     bool threw = false;
     try
     {
-        IMapper.Create(Cartridge.FromBytes(BuildRom(1, 1, 0x10)));
+        IMapper.Create(Cartridge.FromBytes(BuildRom(1, 1, 0x40)));
     }
     catch (NotSupportedException)
     {
@@ -624,7 +626,8 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
 
 {
     Cartridge cartridge = Cartridge.FromBytes(BuildRom(1, 1));
-    NesBus bus = new(IMapper.Create(cartridge));
+    IMapper mapper = IMapper.Create(cartridge);
+    NesBus bus = new(mapper, new Ppu2C02(mapper), new Controller(), new Controller());
 
     bus.Write(0x0000, 0x42);
     Check("bus: work RAM mirrors three more times",
@@ -651,6 +654,382 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
     nes.StepInstruction();
     Check("console: runs an instruction out of cartridge ROM",
         nes.Cpu.A == 0x77, $"got {nes.Cpu.A:X2}");
+}
+
+// --------------------------------------------------------------- more boards
+
+{
+    // UxROM: the lower half switches, the upper half is pinned to the last bank.
+    byte[] image = BuildRom(4, 1, 0x20); // mapper 2
+    image[16 + (0 * 16384)] = 0xA0;
+    image[16 + (1 * 16384)] = 0xA1;
+    image[16 + (3 * 16384)] = 0xA3;
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    Check("uxrom: starts on the first bank", mapper.CpuRead(0x8000) == 0xA0,
+        $"got {mapper.CpuRead(0x8000):X2}");
+    Check("uxrom: the last bank is fixed high", mapper.CpuRead(0xC000) == 0xA3,
+        $"got {mapper.CpuRead(0xC000):X2}");
+
+    mapper.CpuWrite(0x8000, 0x01);
+    Check("uxrom: switches the lower half", mapper.CpuRead(0x8000) == 0xA1,
+        $"got {mapper.CpuRead(0x8000):X2}");
+    Check("uxrom: leaves the upper half alone", mapper.CpuRead(0xC000) == 0xA3,
+        $"got {mapper.CpuRead(0xC000):X2}");
+}
+
+{
+    // CNROM swaps all eight kilobytes of tile data at once.
+    byte[] image = BuildRom(1, 2, 0x30); // mapper 3
+    image[16 + 16384] = 0xC0;              // first character bank
+    image[16 + 16384 + 8192] = 0xC1;       // second
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    Check("cnrom: starts on the first character bank", mapper.PpuRead(0x0000) == 0xC0,
+        $"got {mapper.PpuRead(0x0000):X2}");
+    mapper.CpuWrite(0x8000, 0x01);
+    Check("cnrom: switches character banks", mapper.PpuRead(0x0000) == 0xC1,
+        $"got {mapper.PpuRead(0x0000):X2}");
+}
+
+{
+    // MMC1 takes five writes to accept one value, lowest bit first.
+    byte[] image = BuildRom(4, 1, 0x10); // mapper 1
+    image[16 + (0 * 16384)] = 0xB0;
+    image[16 + (2 * 16384)] = 0xB2;
+    image[16 + (3 * 16384)] = 0xB3;
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    Check("mmc1: powers up with the last bank fixed high",
+        mapper.CpuRead(0xC000) == 0xB3, $"got {mapper.CpuRead(0xC000):X2}");
+
+    void SerialWrite(ushort address, byte value)
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            mapper.CpuWrite(address, (byte)((value >> i) & 0x01));
+        }
+    }
+
+    SerialWrite(0xE000, 0x02); // program bank 2 into the lower half
+    Check("mmc1: accepts a bank after five writes",
+        mapper.CpuRead(0x8000) == 0xB2, $"got {mapper.CpuRead(0x8000):X2}");
+
+    Check("mmc1: an incomplete sequence changes nothing", true);
+    mapper.CpuWrite(0xE000, 0x01);
+    mapper.CpuWrite(0xE000, 0x01);
+    Check("mmc1: two of five writes leave the bank alone",
+        mapper.CpuRead(0x8000) == 0xB2, $"got {mapper.CpuRead(0x8000):X2}");
+
+    mapper.CpuWrite(0xE000, 0x80); // reset clears the sequence
+    SerialWrite(0x8000, 0x03);     // control: horizontal mirroring
+    Check("mmc1: control register selects mirroring",
+        mapper.Mirroring == Mirroring.Horizontal, $"got {mapper.Mirroring}");
+
+    SerialWrite(0x8000, 0x02);
+    Check("mmc1: and can select vertical",
+        mapper.Mirroring == Mirroring.Vertical, $"got {mapper.Mirroring}");
+}
+
+// ---------------------------------------------------------- picture unit
+
+Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
+{
+    byte flags6 = mirroring == Mirroring.Vertical ? (byte)0x01 : (byte)0x00;
+    Cartridge cartridge = Cartridge.FromBytes(BuildRom(1, 0, flags6));
+    return new Ppu2C02(IMapper.Create(cartridge));
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+
+    // $2006 takes the high half of the address first, then the low half.
+    ppu.WriteRegister(0x2006, 0x21);
+    ppu.WriteRegister(0x2006, 0x08);
+    ppu.WriteRegister(0x2007, 0x5A);
+
+    ppu.WriteRegister(0x2006, 0x21);
+    ppu.WriteRegister(0x2006, 0x08);
+    ppu.ReadRegister(0x2007);                    // the buffered read is one behind
+    byte value = ppu.ReadRegister(0x2007);
+    Check("ppu: name table write and buffered read", value == 0x5A, $"got {value:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+    ppu.WriteRegister(0x2000, 0x04); // step 32 bytes per access instead of one
+    ppu.WriteRegister(0x2006, 0x20);
+    ppu.WriteRegister(0x2006, 0x00);
+    ppu.WriteRegister(0x2007, 0x11);
+    ppu.WriteRegister(0x2007, 0x22);
+
+    ppu.WriteRegister(0x2006, 0x20);
+    ppu.WriteRegister(0x2006, 0x20);
+    ppu.ReadRegister(0x2007);
+    byte value = ppu.ReadRegister(0x2007);
+    Check("ppu: the address step follows the control register", value == 0x22,
+        $"got {value:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+
+    // Palette memory answers immediately rather than through the read buffer.
+    ppu.WriteRegister(0x2006, 0x3F);
+    ppu.WriteRegister(0x2006, 0x01);
+    ppu.WriteRegister(0x2007, 0x24);
+
+    ppu.WriteRegister(0x2006, 0x3F);
+    ppu.WriteRegister(0x2006, 0x01);
+    byte value = ppu.ReadRegister(0x2007);
+    Check("ppu: palette reads are not buffered", value == 0x24, $"got {value:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+
+    // The backdrop of each sprite palette is the same byte as the background one.
+    ppu.WriteRegister(0x2006, 0x3F);
+    ppu.WriteRegister(0x2006, 0x10);
+    ppu.WriteRegister(0x2007, 0x2B);
+
+    ppu.WriteRegister(0x2006, 0x3F);
+    ppu.WriteRegister(0x2006, 0x00);
+    byte value = ppu.ReadRegister(0x2007);
+    Check("ppu: $3F10 and $3F00 are the same byte", value == 0x2B, $"got {value:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu(Mirroring.Horizontal);
+    ppu.WriteRegister(0x2006, 0x20);
+    ppu.WriteRegister(0x2006, 0x00);
+    ppu.WriteRegister(0x2007, 0x77);
+
+    // Horizontal mirroring puts the second screen on top of the first.
+    ppu.WriteRegister(0x2006, 0x24);
+    ppu.WriteRegister(0x2006, 0x00);
+    ppu.ReadRegister(0x2007);
+    byte value = ppu.ReadRegister(0x2007);
+    Check("ppu: horizontal mirroring pairs $2000 with $2400", value == 0x77,
+        $"got {value:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu(Mirroring.Vertical);
+    ppu.WriteRegister(0x2006, 0x20);
+    ppu.WriteRegister(0x2006, 0x00);
+    ppu.WriteRegister(0x2007, 0x66);
+
+    // Vertical mirroring pairs $2000 with $2800 instead.
+    ppu.WriteRegister(0x2006, 0x28);
+    ppu.WriteRegister(0x2006, 0x00);
+    ppu.ReadRegister(0x2007);
+    byte value = ppu.ReadRegister(0x2007);
+    Check("ppu: vertical mirroring pairs $2000 with $2800", value == 0x66,
+        $"got {value:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+
+    // Half a $2006 sequence, then a status read, which resets the latch. The next
+    // write must be treated as a first write again.
+    ppu.WriteRegister(0x2006, 0x21);
+    ppu.ReadRegister(0x2002);
+    ppu.WriteRegister(0x2006, 0x20);
+    ppu.WriteRegister(0x2006, 0x00);
+    ppu.WriteRegister(0x2007, 0x3C);
+
+    ppu.WriteRegister(0x2006, 0x20);
+    ppu.WriteRegister(0x2006, 0x00);
+    ppu.ReadRegister(0x2007);
+    byte value = ppu.ReadRegister(0x2007);
+    Check("ppu: reading the status resets the write latch", value == 0x3C,
+        $"got {value:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+
+    // Run to the start of vertical blank: 262 lines of 341 cycles, and the flag
+    // goes up on the second cycle of line 241.
+    for (int i = 0; i < (242 * 341) + 2; i++)
+    {
+        ppu.Step();
+    }
+
+    byte status = ppu.ReadRegister(0x2002);
+    Check("ppu: vertical blank flag goes up on line 241", (status & 0x80) != 0,
+        $"got {status:X2} at line {ppu.Scanline}");
+
+    byte again = ppu.ReadRegister(0x2002);
+    Check("ppu: reading the status clears the flag", (again & 0x80) == 0,
+        $"got {again:X2}");
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+    ppu.WriteRegister(0x2000, 0x80); // ask for the interrupt
+
+    bool raised = false;
+    for (int i = 0; i < (242 * 341) + 2 && !raised; i++)
+    {
+        ppu.Step();
+        raised = ppu.ConsumeNmi();
+    }
+
+    Check("ppu: asks for an interrupt when the frame ends", raised);
+}
+
+{
+    Ppu2C02 ppu = NewPpu();
+
+    // One frame is 262 lines of 341 cycles with rendering off.
+    int steps = 0;
+    while (!ppu.FrameComplete)
+    {
+        ppu.Step();
+        steps++;
+    }
+
+    Check("ppu: a frame is 89,342 cycles", steps == 341 * 262, $"got {steps}");
+}
+
+// ------------------------------------------------------------ drawing a frame
+
+{
+    // A whole console rendering one tile, checked pixel by pixel. The program
+    // below writes a palette, puts tile 1 in the top left of the name table and
+    // turns the background on.
+    byte[] program =
+    [
+        0xA9, 0x3F, 0x8D, 0x06, 0x20,  // point the address at the palette
+        0xA9, 0x00, 0x8D, 0x06, 0x20,
+        0xA9, 0x0F, 0x8D, 0x07, 0x20,  // backdrop
+        0xA9, 0x16, 0x8D, 0x07, 0x20,  // colour 1
+        0xA9, 0x2A, 0x8D, 0x07, 0x20,
+        0xA9, 0x30, 0x8D, 0x07, 0x20,
+        0xA9, 0x20, 0x8D, 0x06, 0x20,  // point it at the name table
+        0xA9, 0x00, 0x8D, 0x06, 0x20,
+        0xA9, 0x01, 0x8D, 0x07, 0x20,  // tile 1 in the corner
+        0x8D, 0x07, 0x20,              // and again, in the square beside it
+        0xA9, 0x00, 0x8D, 0x05, 0x20,  // no scroll
+        0x8D, 0x05, 0x20,
+        0xA9, 0x08, 0x8D, 0x01, 0x20,  // background on, leftmost squares clipped
+        0x4C, 0x3D, 0xC0,              // and wait here
+    ];
+
+    byte[] image = BuildRom(1, 1);
+    program.CopyTo(image, 16);
+    image[16 + 0x3FFC] = 0x00; // reset vector -> $C000
+    image[16 + 0x3FFD] = 0xC0;
+
+    // Tile 1: every pixel in the low plane set, so all eight rows read as colour 1.
+    for (int row = 0; row < 8; row++)
+    {
+        image[16 + 16384 + 0x10 + row] = 0xFF;
+        image[16 + 16384 + 0x18 + row] = 0x00;
+    }
+
+    Nes nes = new(Cartridge.FromBytes(image));
+    for (int frame = 0; frame < 3; frame++)
+    {
+        nes.RunFrame();
+    }
+
+    byte[] screen = nes.Ppu.FrameBuffer;
+    bool tileDrawn = true;
+    for (int y = 0; y < 8 && tileDrawn; y++)
+    {
+        for (int x = 8; x < 16 && tileDrawn; x++)
+        {
+            tileDrawn = screen[(y * 256) + x] == 0x16;
+        }
+    }
+
+    Check("render: the tile is drawn in its palette colour", tileDrawn,
+        $"got {screen[8]:X2} at the second square");
+
+    // The mask bit that would show the leftmost eight pixels was left off, so the
+    // identical tile in the corner must not appear.
+    bool leftClipped = true;
+    for (int y = 0; y < 8 && leftClipped; y++)
+    {
+        for (int x = 0; x < 8 && leftClipped; x++)
+        {
+            leftClipped = screen[(y * 256) + x] == 0x0F;
+        }
+    }
+
+    Check("render: the leftmost squares are clipped away", leftClipped,
+        $"got {screen[0]:X2} at the corner");
+    Check("render: the rest of the line is the backdrop", screen[16] == 0x0F,
+        $"got {screen[16]:X2}");
+    Check("render: the bottom of the screen is the backdrop too",
+        screen[(239 * 256) + 255] == 0x0F, $"got {screen[(239 * 256) + 255]:X2}");
+    Check("render: three frames were produced", nes.Ppu.FrameCount >= 3,
+        $"got {nes.Ppu.FrameCount}");
+}
+
+// ------------------------------------------------------------- sprite memory
+
+{
+    byte[] image = BuildRom(1, 1);
+    image[16 + 0x3FFC] = 0x00;
+    image[16 + 0x3FFD] = 0xC0;
+
+    // LDA #$02; STA $4014 -- copy page two into sprite memory.
+    byte[] program = [0xA9, 0x02, 0x8D, 0x14, 0x40, 0x4C, 0x05, 0xC0];
+    program.CopyTo(image, 16);
+
+    Nes nes = new(Cartridge.FromBytes(image));
+    for (int i = 0; i < 256; i++)
+    {
+        nes.Bus.Write((ushort)(0x0200 + i), (byte)i);
+    }
+
+    nes.StepInstruction(); // LDA
+    int cycles = nes.StepInstruction(); // STA, which triggers the transfer
+
+    Check("dma: the processor is held still for the transfer", cycles >= 513,
+        $"got {cycles}");
+
+    nes.Ppu.WriteRegister(0x2003, 0x00);
+    byte first = nes.Ppu.ReadRegister(0x2004);
+    nes.Ppu.WriteRegister(0x2003, 0x10);
+    byte sixteenth = nes.Ppu.ReadRegister(0x2004);
+
+    Check("dma: sprite memory holds the copied page",
+        first == 0x00 && sixteenth == 0x10, $"got {first:X2} and {sixteenth:X2}");
+}
+
+// --------------------------------------------------------------- controllers
+
+{
+    Controller controller = new() { Buttons = NesButton.A | NesButton.Start };
+
+    controller.Write(1); // latch
+    controller.Write(0);
+
+    // Buttons come out one at a time: A, B, Select, Start, Up, Down, Left, Right.
+    int[] bits = new int[8];
+    for (int i = 0; i < 8; i++)
+    {
+        bits[i] = controller.Read() & 1;
+    }
+
+    Check("controller: reports the buttons in hardware order",
+        bits[0] == 1 && bits[1] == 0 && bits[2] == 0 && bits[3] == 1
+        && bits[4] == 0 && bits[5] == 0 && bits[6] == 0 && bits[7] == 0,
+        $"got [{string.Join(",", bits)}]");
+}
+
+{
+    Controller controller = new() { Buttons = NesButton.B };
+    controller.Write(1); // held high, so the register keeps reloading
+
+    Check("controller: a held strobe keeps reporting the first button",
+        (controller.Read() & 1) == 0 && (controller.Read() & 1) == 0);
 }
 
 // ------------------------------------------------------------------ summary
