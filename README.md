@@ -2,7 +2,9 @@
 
 A Nintendo Entertainment System emulator written in C#, built around a cycle counted 6502 core, a picture unit that follows the beam and a sound unit with the real non-linear mixer, verified against the hardware behaviour that games actually depend on.
 
-![demo.nes running](docs/demo.png)
+![Super Mario Bros. 3 running in the emulator](docs/screenshot.png)
+
+Super Mario Bros. 3 on an MMC3 board: four switchable program slots, eight tile banks, and the line counter that splits the screen.
 
 The console is a small, completely documented machine, which makes it an unusually honest thing to build: there is a right answer for every instruction, and published test programs exist to say whether you got it. This repository aims at those answers rather than at a screenshot that looks close enough.
 
@@ -127,7 +129,9 @@ dotnet build NesEmulator.sln
 dotnet run --project src/NesEmulator
 ```
 
-Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/demo.nes` is included and is what the picture above shows: a handwritten cartridge that fills a screen with tiles, scrolls it from the frame interrupt, and sweeps a square wave in step with the scroll so there is something to hear as well. `tools/make-demo-rom.sh` builds it, with the full source listed in its comments.
+Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/demo.nes` is included: a handwritten cartridge that fills a screen with tiles, scrolls it from the frame interrupt, and sweeps a square wave in step with the scroll so there is something to hear as well. `tools/make-demo-rom.sh` builds it, with the full source listed in its comments.
+
+![The demo cartridge](docs/demo.png)
 
 | | |
 |---|---|
