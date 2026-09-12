@@ -1,4 +1,5 @@
 using NesEmulator.Core;
+using NesEmulator.Core.Apu;
 using NesEmulator.Core.Cartridges;
 using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Cpu;
@@ -612,7 +613,7 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
     bool threw = false;
     try
     {
-        IMapper.Create(Cartridge.FromBytes(BuildRom(1, 1, 0x40)));
+        IMapper.Create(Cartridge.FromBytes(BuildRom(1, 1, 0x50)));
     }
     catch (NotSupportedException)
     {
@@ -627,7 +628,7 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
 {
     Cartridge cartridge = Cartridge.FromBytes(BuildRom(1, 1));
     IMapper mapper = IMapper.Create(cartridge);
-    NesBus bus = new(mapper, new Ppu2C02(mapper), new Controller(), new Controller());
+    NesBus bus = new(mapper, new Ppu2C02(mapper), new Apu2A03(), new Controller(), new Controller());
 
     bus.Write(0x0000, 0x42);
     Check("bus: work RAM mirrors three more times",
@@ -1032,6 +1033,358 @@ Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
         (controller.Read() & 1) == 0 && (controller.Read() & 1) == 0);
 }
 
+// ------------------------------------------------------------------- mmc3
+
+{
+    // 128 KB of program ROM is sixteen eight kilobyte slots. Mark the first byte
+    // of a few of them so the bank in the window can be identified.
+    byte[] image = BuildRom(8, 8, 0x40); // mapper 4
+    for (int slot = 0; slot < 16; slot++)
+    {
+        image[16 + (slot * 8192)] = (byte)(0xD0 + slot);
+    }
+
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    Check("mmc3: the last slot is fixed", mapper.CpuRead(0xE000) == 0xDF,
+        $"got {mapper.CpuRead(0xE000):X2}");
+    Check("mmc3: the second to last slot is fixed in mode 0",
+        mapper.CpuRead(0xC000) == 0xDE, $"got {mapper.CpuRead(0xC000):X2}");
+
+    mapper.CpuWrite(0x8000, 6); // select the first program register
+    mapper.CpuWrite(0x8001, 3); // and point it at slot three
+    Check("mmc3: the switchable slot follows its register",
+        mapper.CpuRead(0x8000) == 0xD3, $"got {mapper.CpuRead(0x8000):X2}");
+
+    mapper.CpuWrite(0x8000, 0x46); // same register, but the other program mode
+    mapper.CpuWrite(0x8001, 3);
+    Check("mmc3: program mode 1 swaps the two halves",
+        mapper.CpuRead(0xC000) == 0xD3 && mapper.CpuRead(0x8000) == 0xDE,
+        $"got {mapper.CpuRead(0xC000):X2} and {mapper.CpuRead(0x8000):X2}");
+}
+
+{
+    byte[] image = BuildRom(8, 8, 0x40);
+    int chrStart = 16 + (8 * 16384);
+    for (int slot = 0; slot < 64; slot++)
+    {
+        image[chrStart + (slot * 1024)] = (byte)slot;
+    }
+
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    mapper.CpuWrite(0x8000, 2); // the first one kilobyte register
+    mapper.CpuWrite(0x8001, 5);
+    Check("mmc3: a one kilobyte tile bank follows its register",
+        mapper.PpuRead(0x1000) == 5, $"got {mapper.PpuRead(0x1000)}");
+
+    mapper.CpuWrite(0x8000, 0); // the first two kilobyte register
+    mapper.CpuWrite(0x8001, 8);
+    Check("mmc3: a two kilobyte bank covers two slots",
+        mapper.PpuRead(0x0000) == 8 && mapper.PpuRead(0x0400) == 9,
+        $"got {mapper.PpuRead(0x0000)} and {mapper.PpuRead(0x0400)}");
+
+    mapper.CpuWrite(0x8000, 0x80); // tile mode 1 swaps the halves over
+    Check("mmc3: tile mode 1 moves the large banks to the top",
+        mapper.PpuRead(0x1000) == 8, $"got {mapper.PpuRead(0x1000)}");
+
+    mapper.CpuWrite(0xA000, 0x00);
+    Check("mmc3: mirroring register selects vertical",
+        mapper.Mirroring == Mirroring.Vertical, $"got {mapper.Mirroring}");
+    mapper.CpuWrite(0xA000, 0x01);
+    Check("mmc3: and horizontal",
+        mapper.Mirroring == Mirroring.Horizontal, $"got {mapper.Mirroring}");
+}
+
+{
+    // The line counter: load three, and the interrupt arrives on the fourth line,
+    // because the first one is spent reloading.
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(BuildRom(2, 1, 0x40)));
+    mapper.CpuWrite(0xC000, 3);    // latch
+    mapper.CpuWrite(0xC001, 0);    // ask for a reload
+    mapper.CpuWrite(0xE001, 0);    // enable
+
+    mapper.OnScanline();
+    mapper.OnScanline();
+    mapper.OnScanline();
+    Check("mmc3: no interrupt before the count runs out", !mapper.IrqPending);
+
+    mapper.OnScanline();
+    Check("mmc3: the interrupt arrives on the counted line", mapper.IrqPending);
+
+    mapper.CpuWrite(0xE000, 0);    // disabling also acknowledges
+    Check("mmc3: disabling clears the interrupt", !mapper.IrqPending);
+}
+
+{
+    // The picture unit is what clocks those boards, once per line while drawing.
+    CountingMapper counter = new();
+    Ppu2C02 ppu = new(counter);
+    ppu.WriteRegister(0x2001, 0x08); // rendering on
+
+    while (!ppu.FrameComplete)
+    {
+        ppu.Step();
+    }
+
+    Check("ppu: clocks the board once per drawn line, pre-render included",
+        counter.Scanlines == 241, $"got {counter.Scanlines}");
+}
+
+// -------------------------------------------------------------- sound unit
+
+{
+    LengthCounter length = new() { Enabled = true };
+    length.Load(0);
+    Check("length: loads from the table", length.Value == 10, $"got {length.Value}");
+
+    for (int i = 0; i < 10; i++)
+    {
+        length.Clock();
+    }
+
+    Check("length: counts down to silence", !length.Active, $"got {length.Value}");
+
+    length.Load(0);
+    length.Halted = true;
+    length.Clock();
+    Check("length: a halted counter holds", length.Value == 10, $"got {length.Value}");
+}
+
+{
+    Envelope envelope = new() { ConstantVolume = true, Volume = 9 };
+    Check("envelope: constant volume passes straight through", envelope.Output == 9,
+        $"got {envelope.Output}");
+
+    envelope.ConstantVolume = false;
+    envelope.Volume = 0; // the fastest decay
+    envelope.Restart();
+    envelope.Clock();
+    Check("envelope: starts at full volume", envelope.Output == 15, $"got {envelope.Output}");
+
+    envelope.Clock();
+    envelope.Clock();
+    Check("envelope: decays", envelope.Output == 13, $"got {envelope.Output}");
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4015, 0x0F);  // enable the four tone channels
+    apu.WriteRegister(0x4000, 0x9A);  // half duty, constant volume 10
+    apu.WriteRegister(0x4002, 0x00);
+    apu.WriteRegister(0x4003, 0x01);  // timer $100, and load the length counter
+
+    Check("pulse: silent on the low part of its duty cycle", apu.Pulse1.Output() == 0,
+        $"got {apu.Pulse1.Output()}");
+
+    apu.Pulse1.Clock();
+    Check("pulse: sounds on the high part", apu.Pulse1.Output() == 10,
+        $"got {apu.Pulse1.Output()}");
+
+    // A period below eight is above hearing and is silenced rather than played.
+    apu.WriteRegister(0x4002, 0x04);
+    apu.WriteRegister(0x4003, 0x00);
+    apu.Pulse1.Clock();
+    Check("pulse: a period below eight is muted", apu.Pulse1.Output() == 0,
+        $"got {apu.Pulse1.Output()}");
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4015, 0x04); // triangle only
+    apu.WriteRegister(0x4008, 0x7F); // a long linear counter
+    apu.WriteRegister(0x400A, 0x20);
+    apu.WriteRegister(0x400B, 0x08); // timer and length
+
+    Check("triangle: starts at the top of its staircase", apu.Triangle.Output() == 15,
+        $"got {apu.Triangle.Output()}");
+
+    apu.Triangle.ClockLinear();
+    apu.Triangle.Clock();
+    Check("triangle: steps down the staircase", apu.Triangle.Output() == 14,
+        $"got {apu.Triangle.Output()}");
+
+    // With its length counter disabled the sequencer stops and the output holds.
+    apu.WriteRegister(0x4015, 0x00);
+    int held = apu.Triangle.Output();
+    for (int i = 0; i < 100; i++)
+    {
+        apu.Triangle.Clock();
+    }
+
+    Check("triangle: a silenced channel holds its level", apu.Triangle.Output() == held,
+        $"got {apu.Triangle.Output()} after {held}");
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4015, 0x08); // noise only
+    apu.WriteRegister(0x400C, 0x1F); // constant volume 15
+    apu.WriteRegister(0x400E, 0x00); // the shortest period
+    apu.WriteRegister(0x400F, 0x08); // load the length counter
+
+    bool sawSilence = false;
+    bool sawSound = false;
+    for (int i = 0; i < 2000; i++)
+    {
+        apu.Noise.Clock();
+        if (apu.Noise.Output() == 0)
+        {
+            sawSilence = true;
+        }
+        else
+        {
+            sawSound = true;
+        }
+    }
+
+    Check("noise: the shift register produces both levels", sawSilence && sawSound);
+
+    apu.WriteRegister(0x4015, 0x00);
+    Check("noise: silent once its length counter is disabled", apu.Noise.Output() == 0,
+        $"got {apu.Noise.Output()}");
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4017, 0x00); // four step mode, interrupt allowed
+
+    for (int i = 0; i < 29828; i++)
+    {
+        apu.Step();
+    }
+
+    Check("frame counter: quiet until the end of its sequence", !apu.IrqPending);
+
+    apu.Step();
+    Check("frame counter: interrupts at the end of the sequence", apu.IrqPending);
+
+    byte status = apu.ReadStatus();
+    Check("frame counter: the status register reports it", (status & 0x40) != 0,
+        $"got {status:X2}");
+    Check("frame counter: reading the status acknowledges it", !apu.IrqPending);
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4017, 0x40); // interrupt inhibited
+
+    for (int i = 0; i < 30000; i++)
+    {
+        apu.Step();
+    }
+
+    Check("frame counter: stays quiet when inhibited", !apu.IrqPending);
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4017, 0x80); // five step mode never interrupts
+
+    for (int i = 0; i < 40000; i++)
+    {
+        apu.Step();
+    }
+
+    Check("frame counter: five step mode never interrupts", !apu.IrqPending);
+}
+
+{
+    Apu2A03 apu = new(44100);
+
+    // One second of processor cycles should produce one second of samples.
+    for (int i = 0; i < (int)Apu2A03.ClockRate; i++)
+    {
+        apu.Step();
+    }
+
+    Check("sound: a second of cycles yields a second of samples",
+        Math.Abs(apu.AvailableSamples - 44100) <= 2, $"got {apu.AvailableSamples}");
+}
+
+{
+    Apu2A03 apu = new();
+    for (int i = 0; i < 5000; i++)
+    {
+        apu.Step();
+    }
+
+    float[] samples = new float[5000];
+    int taken = apu.ReadSamples(samples, samples.Length);
+
+    bool steady = true;
+    for (int i = 1; i < taken && steady; i++)
+    {
+        steady = Math.Abs(samples[i] - samples[0]) < 0.0001f;
+    }
+
+    Check("sound: nothing enabled produces a steady level", steady && taken > 0,
+        $"took {taken}");
+
+    Check("sound: the mixer stays inside its range",
+        samples.Take(taken).All(s => s is >= 0f and <= 1f));
+}
+
+{
+    Apu2A03 apu = new();
+    apu.WriteRegister(0x4015, 0x01);
+    apu.WriteRegister(0x4000, 0x9F); // constant volume 15
+    apu.WriteRegister(0x4002, 0x40);
+    apu.WriteRegister(0x4003, 0x00);
+
+    for (int i = 0; i < 5000; i++)
+    {
+        apu.Step();
+    }
+
+    float[] samples = new float[5000];
+    int taken = apu.ReadSamples(samples, samples.Length);
+
+    Check("sound: a playing channel makes the output move",
+        samples.Take(taken).Distinct().Count() > 1, $"took {taken}");
+}
+
+{
+    Apu2A03 apu = new();
+    apu.Dmc.ReadMemory = _ => 0xFF; // every bit asks for a step up
+    apu.WriteRegister(0x4010, 0x0F); // the fastest rate
+    apu.WriteRegister(0x4012, 0x00); // sample at $C000
+    apu.WriteRegister(0x4013, 0x01); // seventeen bytes of it
+    apu.WriteRegister(0x4015, 0x10); // start it
+
+    Check("sample channel: starts with bytes to play", apu.Dmc.Active);
+
+    for (int i = 0; i < 5000; i++)
+    {
+        apu.Dmc.Clock();
+    }
+
+    Check("sample channel: the level walks up on a run of set bits",
+        apu.Dmc.OutputLevel > 0, $"got {apu.Dmc.OutputLevel}");
+}
+
+{
+    // The console wires both interrupt sources onto the same line.
+    byte[] image = BuildRom(1, 1);
+    image[16 + 0x3FFC] = 0x00;
+    image[16 + 0x3FFD] = 0xC0;
+    image[16] = 0x4C; // JMP $C000, forever
+    image[17] = 0x00;
+    image[18] = 0xC0;
+
+    Nes nes = new(Cartridge.FromBytes(image));
+    nes.Bus.Write(0x4017, 0x00); // four step mode, interrupt allowed
+
+    for (int i = 0; i < 20000; i++)
+    {
+        nes.StepInstruction();
+    }
+
+    Check("console: the sound unit reaches the interrupt line",
+        nes.Apu.IrqPending || nes.Cpu.PC != 0xC000,
+        $"pc {nes.Cpu.PC:X4}");
+}
+
 // ------------------------------------------------------------------ summary
 
 Console.WriteLine();
@@ -1048,6 +1401,28 @@ sealed class FlatBus : IBus
     public void Write(ushort address, byte value) => Memory[address] = value;
 
     public byte Peek(ushort address) => Memory[address];
+}
+
+/// <summary>A board that does nothing but count the lines it is clocked on.</summary>
+sealed class CountingMapper : IMapper
+{
+    public int Scanlines { get; private set; }
+
+    public Mirroring Mirroring => Mirroring.Horizontal;
+
+    public byte CpuRead(ushort address) => 0;
+
+    public void CpuWrite(ushort address, byte value)
+    {
+    }
+
+    public byte PpuRead(ushort address) => 0;
+
+    public void PpuWrite(ushort address, byte value)
+    {
+    }
+
+    public void OnScanline() => Scanlines++;
 }
 
 /// <summary>Wraps a bus and notes every write, to check access patterns rather than results.</summary>

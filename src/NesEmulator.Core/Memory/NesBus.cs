@@ -1,3 +1,4 @@
+using NesEmulator.Core.Apu;
 using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Input;
 using NesEmulator.Core.Ppu;
@@ -22,11 +23,13 @@ namespace NesEmulator.Core.Memory;
 public sealed class NesBus(
     IMapper mapper,
     Ppu2C02 ppu,
+    Apu2A03 apu,
     Controller port1,
     Controller port2) : IBus
 {
     private readonly IMapper _mapper = mapper;
     private readonly Ppu2C02 _ppu = ppu;
+    private readonly Apu2A03 _apu = apu;
     private readonly Controller _port1 = port1;
     private readonly Controller _port2 = port2;
     private readonly byte[] _ram = new byte[0x0800];
@@ -70,9 +73,12 @@ public sealed class NesBus(
         {
             value = _port2.Read();
         }
+        else if (address == 0x4015)
+        {
+            value = _apu.ReadStatus();
+        }
         else if (address < 0x4020)
         {
-            // TODO: sound unit status at $4015.
             value = _openBus;
         }
         else
@@ -107,7 +113,7 @@ public sealed class NesBus(
         }
         else if (address < 0x4020)
         {
-            // TODO: sound unit registers.
+            _apu.WriteRegister(address, value);
         }
         else
         {

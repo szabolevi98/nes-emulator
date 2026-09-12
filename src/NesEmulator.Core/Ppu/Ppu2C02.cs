@@ -268,6 +268,14 @@ public sealed class Ppu2C02
             {
                 StepBackgroundFetch();
                 StepSprites();
+
+                // Boards that count lines are clocked here. On hardware they watch
+                // an address line rise as the fetch pattern moves between the two
+                // halves of tile memory, which lands around this point in the line.
+                if (Cycle == 260)
+                {
+                    _mapper.OnScanline();
+                }
             }
         }
 
