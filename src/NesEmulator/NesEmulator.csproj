@@ -10,6 +10,7 @@
     <RootNamespace>NesEmulator</RootNamespace>
     <AssemblyName>NesEmulator</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
     <Platforms>AnyCPU;x64</Platforms>
@@ -23,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NesEmulator.Core\NesEmulator.Core.csproj" />
+    <EmbeddedResource Include="Resources\app.ico" LogicalName="NesEmulator.app.ico" />
   </ItemGroup>
 
 </Project>

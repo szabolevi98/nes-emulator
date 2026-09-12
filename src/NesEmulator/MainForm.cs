@@ -69,9 +69,17 @@ public sealed class MainForm : Form
     private double _lastFpsReport;
     private double _fps;
     private readonly FramePacer _pacer = new();
+    private readonly Icon _windowIcon;
 
     public MainForm(string? romPath)
     {
+        using (Stream stream = typeof(MainForm).Assembly.GetManifestResourceStream("NesEmulator.app.ico")
+            ?? throw new InvalidOperationException("The application icon resource is missing."))
+        {
+            using Icon resourceIcon = new(stream, 32, 32);
+            _windowIcon = (Icon)resourceIcon.Clone();
+            Icon = _windowIcon;
+        }
         Text = "NES Emulator";
         BackColor = Background;
         ForeColor = Foreground;
@@ -629,6 +637,7 @@ public sealed class MainForm : Form
         {
             _clock.Dispose();
             _audio?.Dispose();
+            _windowIcon.Dispose();
         }
 
         base.Dispose(disposing);
