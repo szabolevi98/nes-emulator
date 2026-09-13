@@ -409,6 +409,73 @@ foreach ((byte a, byte operand, byte result, bool carry, bool overflow) in adcCa
 }
 
 {
+    // $AB is unstable silicon. Both documented masks are selectable, and the
+    // profile has to survive into the register file byte for byte.
+    (Cpu6502 Cpu, FlatBus Bus) AbMachine(AbOpcodeProfile profile, byte a)
+    {
+        FlatBus bus = new();
+        bus.Memory[0xFFFC] = 0x00;
+        bus.Memory[0xFFFD] = 0x80;
+        new byte[] { 0xA9, a, 0xAB, 0x11 }.CopyTo(bus.Memory, 0x8000); // LDA #a; LAX #$11
+        Cpu6502 cpu = new(bus, profile);
+        cpu.Reset();
+        cpu.Step();
+        cpu.Step();
+        return (cpu, bus);
+    }
+
+    (Cpu6502 ee, _) = AbMachine(AbOpcodeProfile.MaskEE, 0x00);
+    Check("ab: the $EE profile masks the operand", ee.A == 0x00 && ee.X == 0x00,
+        $"A={ee.A:X2} X={ee.X:X2}");
+
+    (Cpu6502 ff, _) = AbMachine(AbOpcodeProfile.MaskFF, 0x00);
+    Check("ab: the $FF profile takes the operand unchanged", ff.A == 0x11 && ff.X == 0x11,
+        $"A={ff.A:X2} X={ff.X:X2}");
+
+    // With every mask bit already set in A the two profiles have to agree.
+    (Cpu6502 agreeEe, _) = AbMachine(AbOpcodeProfile.MaskEE, 0xFF);
+    (Cpu6502 agreeFf, _) = AbMachine(AbOpcodeProfile.MaskFF, 0xFF);
+    Check("ab: the profiles agree when A already covers the mask",
+        agreeEe.A == 0x11 && agreeEe.A == agreeFf.A, $"{agreeEe.A:X2} against {agreeFf.A:X2}");
+
+    Check("ab: the default profile is the $EE mask", new Cpu6502(new FlatBus()).AbProfile == AbOpcodeProfile.MaskEE);
+
+    bool rejected = false;
+    try
+    {
+        _ = new Cpu6502(new FlatBus(), (AbOpcodeProfile)0x42);
+    }
+    catch (ArgumentOutOfRangeException)
+    {
+        rejected = true;
+    }
+
+    Check("ab: an undefined profile value is refused", rejected);
+}
+
+{
+    // XAA ($8B) keeps its own mask; the $AB profile must not reach it.
+    (Cpu6502 Cpu, FlatBus Bus) XaaMachine(AbOpcodeProfile profile)
+    {
+        FlatBus bus = new();
+        bus.Memory[0xFFFC] = 0x00;
+        bus.Memory[0xFFFD] = 0x80;
+        new byte[] { 0xA9, 0x00, 0xA2, 0xFF, 0x8B, 0x11 }.CopyTo(bus.Memory, 0x8000); // LDA #0; LDX #$FF; XAA #$11
+        Cpu6502 cpu = new(bus, profile);
+        cpu.Reset();
+        cpu.Step();
+        cpu.Step();
+        cpu.Step();
+        return (cpu, bus);
+    }
+
+    Check("ab: the profile leaves XAA alone",
+        XaaMachine(AbOpcodeProfile.MaskEE).Cpu.A == XaaMachine(AbOpcodeProfile.MaskFF).Cpu.A
+            && XaaMachine(AbOpcodeProfile.MaskFF).Cpu.A == 0x00,
+        $"got {XaaMachine(AbOpcodeProfile.MaskFF).Cpu.A:X2}");
+}
+
+{
     (Cpu6502 cpu, FlatBus bus) = Machine(0xA9, 0xF0, 0xA2, 0x3C, 0x87, 0x20); // LDA; LDX; SAX $20
     cpu.Step();
     cpu.Step();
@@ -1809,6 +1876,36 @@ byte[] BuildBusyRom()
     }
 
     Check("state: refuses a state from another cartridge", threw);
+}
+
+{
+    // A state carries its $AB profile, because the profile changes emulated results.
+    Nes source = new(Cartridge.FromBytes(BuildBusyRom()), abProfile: AbOpcodeProfile.MaskFF);
+    for (int i = 0; i < 500; i++) source.StepInstruction();
+    MemoryStream state = new();
+    source.SaveState(state);
+
+    Nes other = new(Cartridge.FromBytes(BuildBusyRom()));  // the default $EE profile
+    state.Position = 0;
+    bool threw = false;
+    try
+    {
+        other.LoadState(state);
+    }
+    catch (InvalidDataException)
+    {
+        threw = true;
+    }
+
+    Check("state: refuses a state from the other $AB profile", threw);
+
+    // The same profile still round-trips.
+    Nes same = new(Cartridge.FromBytes(BuildBusyRom()), abProfile: AbOpcodeProfile.MaskFF);
+    state.Position = 0;
+    same.LoadState(state);
+    Check("state: restores a state saved under the $FF profile",
+        same.Cpu.Cycles == source.Cpu.Cycles && same.Cpu.PC == source.Cpu.PC,
+        $"{same.Cpu.Cycles} against {source.Cpu.Cycles}");
 }
 
 {

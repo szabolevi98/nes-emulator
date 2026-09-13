@@ -118,15 +118,27 @@ An aborted controller read preserves the continuous read-enable signal through t
 
 References: [NESdev DMA bugs and cycle diagrams](https://www.nesdev.org/wiki/DMA#Bugs), [AccuracyCoin test source](https://github.com/100thCoin/AccuracyCoin/blob/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e/AccuracyCoin.asm), and [measured results](dma-stop-results.md). Mesen's DMC reader and CPU DMA implementation were also consulted to cross-check stop propagation and buffer handling; the implementation here retains this core's existing bus-cycle scheduler.
 
+## Selectable $AB opcode profile
+
+The tenth milestone makes the unstable immediate `LAX` ($AB) a configuration choice rather than a fixed answer, and with it the public suite reaches **55/55**. Nothing else changed: the same run still records **6/6 MMC3** with explicit IRQ profiles, and the separate DMA and sprite suites remain **2/2** and **16/16**.
+
+$AB has no single correct result. The opcode drives the internal data bus against a decaying value, so the effective mask depends on the chip, its temperature and the preceding bus activity. Two models are widely reported. `A = X = operand & (A | $EE)` is what the SingleStepTests NES vectors record; `A = X = operand` is what blargg's `03-immediate` expects. Both are selectable here as `AbOpcodeProfile.MaskEE` (the default) and `AbOpcodeProfile.MaskFF`.
+
+The trade-off is measured rather than asserted. With `$EE`, `03-immediate` fails and all 2,560,000 vectors pass. With `$FF`, all 55 ROMs pass and 4,422 of the 10,000 `ab` vectors fail; no other opcode file changes. Each report names the profile it ran under, so no measurement silently mixes the two: the ROM table is a `$FF` run, the vector report an `$EE` run.
+
+The profile is chosen on the command line (`--ab-profile ee|ff`) or from **Emulation → $AB opcode profile**, exactly as the MMC3 revision is. The core never inspects a test name. `$8B` (XAA) keeps its own `$EE` mask and is unaffected, since its result also depends on X.
+
+References: [CPU unofficial opcodes](https://www.nesdev.org/wiki/CPU_unofficial_opcodes) and [programming with unofficial opcodes](https://www.nesdev.org/wiki/Programming_with_unofficial_opcodes) on the unstable constant, the [SingleStepTests NES vectors](https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502), and blargg's [`03-immediate` source](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/instr_test-v5/source).
+
 ## Validation and save compatibility
 
-- 690 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation and real v2–v8 state migration fixtures.
-- The complete baseline ROM report retains the remaining `$AB` failure and records selected IRQ profiles; DMA results are reported separately.
-- 87 desktop input and menu checks.
+- 701 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation, both `$AB` profiles and real v2–v9 state migration fixtures.
+- The complete baseline ROM report records the selected IRQ profiles and the `$AB` profile it ran under; DMA results are reported separately.
+- 95 desktop input and menu checks.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
-New saves use format v9, adding five bytes for the pending DMC stop and output-reload age. Existing v2–v8 saves remain loadable, starting without a pending stop or recent output-boundary latch. Real v8 fixtures exercise a pending initial fetch and a filled sample buffer; v9 tests replay both GET/PUT stop alignments and partial delays.
+New saves use format v10, adding one header byte for the `$AB` profile. Existing v2–v9 saves remain loadable and are treated as `$EE`, the profile they were written under. Like the MMC3 revision, the profile is checked before any console state is touched: a state from the other profile is refused with a message naming it, because the two models produce different emulated results. A real v9 snapshot written by the previous serializer verifies both paths: it migrates into the `$EE` profile, replays identically for 300 further instructions, and is refused under `$FF`. Format v9 added five bytes for the pending DMC stop and output-reload age, and v2–v8 saves still start without a pending stop or recent output-boundary latch.
 
 v8 added 41 bytes for secondary OAM and the evaluation/fetch latches. Earlier formats have no partial sprite search: migration reconstructs it from saved primary OAM during evaluation, or retains the selected sprite data during fetch/blanking, preserving existing output shifters and status flags. Earlier OAM writes within that line cannot be reconstructed; v8 captures the actual partial state. Real v7 snapshots at dots 100 and 270 verify both migration paths.
 

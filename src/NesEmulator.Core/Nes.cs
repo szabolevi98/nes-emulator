@@ -21,14 +21,15 @@ namespace NesEmulator.Core;
 /// </summary>
 public sealed class Nes
 {
-    public Nes(Cartridge cartridge, int sampleRate = 44100, Mmc3IrqRevision mmc3Revision = Mmc3IrqRevision.Standard)
+    public Nes(Cartridge cartridge, int sampleRate = 44100, Mmc3IrqRevision mmc3Revision = Mmc3IrqRevision.Standard,
+        AbOpcodeProfile abProfile = AbOpcodeProfile.MaskEE)
     {
         Cartridge = cartridge;
         Mapper = IMapper.Create(cartridge, mmc3Revision);
         Ppu = new Ppu2C02(Mapper);
         Apu = new Apu2A03(sampleRate);
         Bus = new NesBus(Mapper, Ppu, Apu, Port1, Port2);
-        Cpu = new Cpu6502(Bus);
+        Cpu = new Cpu6502(Bus, abProfile);
 
         // Both DMA units can hold a CPU read, but never a CPU write.
         Cpu.BeforeRead = address => Bus.RunDma(Cpu, address);
@@ -57,8 +58,9 @@ public sealed class Nes
 
     public Controller Port2 { get; } = new();
 
-    public static Nes FromFile(string path, int sampleRate = 44100, Mmc3IrqRevision mmc3Revision = Mmc3IrqRevision.Standard) =>
-        new(Cartridges.Cartridge.FromFile(path), sampleRate, mmc3Revision);
+    public static Nes FromFile(string path, int sampleRate = 44100, Mmc3IrqRevision mmc3Revision = Mmc3IrqRevision.Standard,
+        AbOpcodeProfile abProfile = AbOpcodeProfile.MaskEE) =>
+        new(Cartridges.Cartridge.FromFile(path), sampleRate, mmc3Revision, abProfile);
 
     public void Reset()
     {
@@ -73,7 +75,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E09; // "NES" and a format version
+    private const uint StateMagic = 0x53454E0A; // "NES" and a format version
+    private const uint StopStateMagic = 0x53454E09;
     private const uint SpriteStateMagic = 0x53454E08;
     private const uint M2StateMagic = 0x53454E07;
     private const uint IrqStateMagic = 0x53454E06;
@@ -94,6 +97,7 @@ public sealed class Nes
         writer.Write(Cartridge.MapperNumber);
         writer.Write(Cartridge.Identity.Span);
         writer.Write((byte)StateIrqRevision);
+        writer.Write((byte)Cpu.AbProfile);
 
         using MemoryStream payload = new();
         WriteStatePayload(new BinaryWriter(payload));
@@ -128,9 +132,9 @@ public sealed class Nes
         bool legacy = magic == LegacyStateMagic;
         bool legacyApu = magic < ApuStateMagic;
         bool legacyDmc = magic < DmcStateMagic;
-        if (magic != StateMagic && magic != SpriteStateMagic && magic != M2StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
+        if (magic != StateMagic && magic != StopStateMagic && magic != SpriteStateMagic && magic != M2StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. A v2 through v9 state is required.");
+            throw new InvalidDataException("Unsupported save state format. A v2 through v10 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -149,6 +153,10 @@ public sealed class Nes
         if (revision != StateIrqRevision)
             throw new InvalidDataException("This save state uses a different MMC3 IRQ revision. Select that revision before loading it.");
 
+        AbOpcodeProfile abProfile = magic >= StateMagic ? (AbOpcodeProfile)reader.ReadByte() : AbOpcodeProfile.MaskEE;
+        if (abProfile != Cpu.AbProfile)
+            throw new InvalidDataException("This save state uses a different $AB opcode profile. Select that profile before loading it.");
+
         // Read and verify the complete payload before touching live console state.
         using MemoryStream current = new();
         WriteStatePayload(new BinaryWriter(current));
@@ -159,7 +167,7 @@ public sealed class Nes
         // v5 adds the DMC buffer, DMA request delay and GET/PUT phase (7 bytes).
         bool legacyFilter = magic < M2StateMagic;
         bool legacySprites = magic < SpriteStateMagic;
-        bool legacyStop = magic < StateMagic;
+        bool legacyStop = magic < StopStateMagic;
         // v7 adds one filter byte only for MMC3 cartridges.
         if (length != current.Length - (legacy ? 2 : 0) - (legacyApu ? 4 : 0) - (legacyDmc ? 7 : 0)
             - (legacyFilter && Mapper is Mmc3 ? 1 : 0) - (legacySprites ? Ppu2C02.SpriteEvaluationStateSize : 0) - (legacyStop ? 5 : 0))

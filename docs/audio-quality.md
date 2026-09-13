@@ -13,14 +13,14 @@ The [noise period table](https://www.nesdev.org/wiki/APU_Noise) is converted to 
 
 ## Validation
 
-Run `dotnet run -c Release --project tests/NesEmulator.Tests` for the 690 offline checks. Audio regressions cover all 16 noise periods against a CPU-clocked reference sequence, DMC bit spacing, prefetch, looping and DMA, APU frame-counter reset and IRQ timing, and the following at both 44.1 and 48 kHz:
+Run `dotnet run -c Release --project tests/NesEmulator.Tests` for the 701 offline checks. Audio regressions cover all 16 noise periods against a CPU-clocked reference sequence, DMC bit spacing, prefetch, looping and DMA, APU frame-counter reset and IRQ timing, and the following at both 44.1 and 48 kHz:
 
 - A 1 kHz signal remains audible with the expected filter gain.
 - A 30 Hz signal is attenuated by the output high-pass filters.
 - A signal 1 kHz above output Nyquist is rejected by more than 46 dB relative to the 1 kHz reference, instead of appearing as an audible alias.
 - Resetting the filter to a held DAC level does not produce a startup impulse.
 
-All eight public APU ROMs now pass, including `7-dmc_basics` and `8-dmc_rates`. The full baseline suite passes 54/55 with explicit MMC3 IRQ profiles, and both additional OAM/DMC DMA ROMs pass. All previously passing ROMs remain passing. The complete results are in [accuracy-results.md](accuracy-results.md) and [dma-results.md](dma-results.md).
+All eight public APU ROMs now pass, including `7-dmc_basics` and `8-dmc_rates`. The full baseline suite passes 55/55 with explicit MMC3 IRQ and `$AB` profiles, and both additional OAM/DMC DMA ROMs pass. All previously passing ROMs remain passing. The complete results are in [accuracy-results.md](accuracy-results.md) and [dma-results.md](dma-results.md).
 
 Local runs with the user's Mega Man 4 and Super Mario Bros. 3 images also generated before/after PCM recordings. These ROMs and recordings are excluded from version control. This validates the output path with real game code; it is not a comparison against a physical console recording.
 

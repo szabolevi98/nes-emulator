@@ -1,7 +1,8 @@
-NES 6502 bus-cycle vectors — measured 2026-09-12
+NES 6502 bus-cycle vectors — measured 2026-09-13
 Source: https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502/v1
-Command: dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cpu-vectors
+Command: dotnet run -c Release --project tests/NesEmulator.Tests -- --ab-profile ee --cpu-vectors roms/cpu-vectors
 Checks: registers, memory, cycle count, every bus address/value/direction; finite JAM bus-loop prefixes.
+Unstable $AB profile: $EE mask (the default). The $FF mask, which the blargg ROM suite expects, passes 5,578/10,000 of ab.json; every other opcode file is unaffected.
 
 00.json: 10000/10000 
 01.json: 10000/10000 
@@ -259,4 +260,4 @@ fc.json: 10000/10000
 fd.json: 10000/10000 
 fe.json: 10000/10000 
 ff.json: 10000/10000 
-2560000/2560000 vectors passed (registers, memory, and every bus cycle).
+2560000/2560000 vectors passed (registers, memory, and every bus cycle) with the $EE mask $AB profile.

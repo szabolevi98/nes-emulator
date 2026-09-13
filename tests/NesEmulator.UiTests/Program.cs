@@ -2,6 +2,7 @@ using System.Reflection;
 using NesEmulator;
 using NesEmulator.Core;
 using NesEmulator.Core.Cartridges.Mappers;
+using NesEmulator.Core.Cpu;
 using NesEmulator.Core.Input;
 
 internal static class Program
@@ -93,6 +94,7 @@ internal static class Program
         Send(screen, Keys.Enter, false);
         Check("F1 remains available to Save State", !Send(screen, Keys.F1, true));
         CheckMapperMenu(form, rom);
+        CheckAbProfileMenu(form, rom);
         form.Dispose();
         using Form survivor = new();
         Check("disposing emulator removes its filter", !Send(survivor, Keys.Enter, true));
@@ -139,6 +141,60 @@ internal static class Program
             Invoke(form, "LoadRom", path);
             Invoke(form, "Stop");
             Check("opening a ROM again restores its default MMC3 profile", standard.Checked && !alternate.Checked);
+        }
+        finally { File.Delete(path); }
+    }
+
+    private static void CheckAbProfileMenu(MainForm form, byte[] rom)
+    {
+        object Field(string name) => typeof(MainForm).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
+        ToolStripMenuItem menu = (ToolStripMenuItem)Field("_abItem");
+        ToolStripMenuItem ee = (ToolStripMenuItem)Field("_abEeItem");
+        ToolStripMenuItem ff = (ToolStripMenuItem)Field("_abFfItem");
+        string path = Path.Combine(Path.GetTempPath(), $"nes-ab-ui-{Guid.NewGuid():N}.nes");
+        try
+        {
+            File.WriteAllBytes(path, rom);
+            Invoke(form, "LoadRom", path);
+            Invoke(form, "Stop");
+            Check("$AB menu is available for any cartridge", menu.Enabled && ee.Checked && !ff.Checked
+                && ((Nes)Field("_nes")).Cpu.AbProfile == AbOpcodeProfile.MaskEE);
+            Nes old = (Nes)Field("_nes");
+            object rewind = Field("_rewind");
+            ff.PerformClick();
+            Nes changed = (Nes)Field("_nes");
+            Check("$FF selection recreates the console and rewind history", !ReferenceEquals(old, changed)
+                && !ReferenceEquals(rewind, Field("_rewind")) && changed.Cpu.AbProfile == AbOpcodeProfile.MaskFF);
+            Check("$AB selection preserves pause and updates checks", !(bool)Field("_running") && ff.Checked && !ee.Checked);
+            ff.PerformClick();
+            Check("selecting the active $AB profile does not restart", ReferenceEquals(changed, Field("_nes")));
+            Invoke(form, "Start");
+            ee.PerformClick();
+            Check("$EE selection preserves running state", (bool)Field("_running") && ee.Checked && !ff.Checked
+                && ((Nes)Field("_nes")).Cpu.AbProfile == AbOpcodeProfile.MaskEE);
+            Invoke(form, "Stop");
+            ff.PerformClick();
+            Invoke(form, "LoadRom", path);
+            Invoke(form, "Stop");
+            Check("opening a ROM again restores the default $AB profile", ee.Checked && !ff.Checked
+                && ((Nes)Field("_nes")).Cpu.AbProfile == AbOpcodeProfile.MaskEE);
+
+            // An MMC3 cartridge has to keep both selections independently.
+            byte[] mmc3Rom = (byte[])rom.Clone();
+            mmc3Rom[6] = 0x40;
+            File.WriteAllBytes(path, mmc3Rom);
+            Invoke(form, "LoadRom", path);
+            Invoke(form, "Stop");
+            ((ToolStripMenuItem)Field("_mmc3AlternateItem")).PerformClick();
+            ff.PerformClick();
+            Nes both = (Nes)Field("_nes");
+            Check("the $AB profile and the MMC3 revision survive together",
+                both.Cpu.AbProfile == AbOpcodeProfile.MaskFF
+                && ((Mmc3)both.Mapper).IrqRevision == Mmc3IrqRevision.Alternate
+                && ff.Checked && ((ToolStripMenuItem)Field("_mmc3AlternateItem")).Checked);
+            ((ToolStripMenuItem)Field("_mmc3StandardItem")).PerformClick();
+            Check("changing the MMC3 revision keeps the $AB profile",
+                ((Nes)Field("_nes")).Cpu.AbProfile == AbOpcodeProfile.MaskFF && ff.Checked);
         }
         finally { File.Delete(path); }
     }

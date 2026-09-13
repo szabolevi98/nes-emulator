@@ -60,3 +60,11 @@ The snapshots follow zero or twenty instructions: the first has a pending
 load request, the second has a filled sample buffer. v9 migration must add
 no pending stop or recent output-reload edge and must preserve subsequent
 execution. These fixtures contain no commercial ROM data.
+
+`v9-dmc-20.state.gz` was written by the core from commit `dcc28a8`, the last
+format-v9 serializer. It uses the same `DmaTests.NewNes()` cartridge and DMC
+setup as the v8 fixtures, saved after twenty instructions, so its payload is
+byte-for-byte a v9 state with a filled sample buffer. v9 headers carry no
+`$AB` opcode profile: migration must assume the `$EE` mask the old core always
+used, keep execution identical afterwards, and refuse the state when the `$FF`
+profile is selected. It contains no commercial ROM data.

@@ -61,6 +61,9 @@ public sealed class MainForm : Form, IMessageFilter
     private readonly ToolStripMenuItem _mmc3Item;
     private readonly ToolStripMenuItem _mmc3StandardItem;
     private readonly ToolStripMenuItem _mmc3AlternateItem;
+    private readonly ToolStripMenuItem _abItem;
+    private readonly ToolStripMenuItem _abEeItem;
+    private readonly ToolStripMenuItem _abFfItem;
     private readonly float[] _audioBuffer = new float[4096];
     private WaveOutPlayer? _audio;
 
@@ -221,6 +224,11 @@ public sealed class MainForm : Form, IMessageFilter
         _mmc3Item.DropDownItems.AddRange([_mmc3StandardItem, _mmc3AlternateItem]);
         emulation.DropDownItems.Add(new ToolStripSeparator());
         emulation.DropDownItems.Add(_mmc3Item);
+        _abEeItem = new("$EE mask (default)", null, (_, _) => ChangeAbProfile(AbOpcodeProfile.MaskEE));
+        _abFfItem = new("$FF mask", null, (_, _) => ChangeAbProfile(AbOpcodeProfile.MaskFF));
+        _abItem = new("$AB opcode profile (restarts ROM)") { Enabled = false };
+        _abItem.DropDownItems.AddRange([_abEeItem, _abFfItem]);
+        emulation.DropDownItems.Add(_abItem);
 
         ToolStripMenuItem view = new("&View");
         ToolStripMenuItem debuggerItem = new("&Debugger", null, (sender, _) =>
@@ -334,16 +342,20 @@ public sealed class MainForm : Form, IMessageFilter
 
     private void LoadRom(string path) => LoadRomWithRevision(path, Mmc3IrqRevision.Standard);
 
-    private void LoadRomWithRevision(string path, Mmc3IrqRevision mmc3Revision)
+    private void LoadRomWithRevision(string path, Mmc3IrqRevision mmc3Revision, AbOpcodeProfile abProfile = AbOpcodeProfile.MaskEE)
     {
         try
         {
-            _nes = Nes.FromFile(path, mmc3Revision: mmc3Revision);
+            _nes = Nes.FromFile(path, mmc3Revision: mmc3Revision, abProfile: abProfile);
             _rewind = new RewindBuffer(_nes);
             _romPath = path;
             _trace.Clear();
             _summary.ForeColor = Muted;
             _summary.Text = $"{Path.GetFileName(path)} — {_nes.Cartridge}";
+            _abItem.Enabled = true;
+            _abEeItem.Checked = abProfile == AbOpcodeProfile.MaskEE;
+            _abFfItem.Checked = abProfile == AbOpcodeProfile.MaskFF;
+            if (abProfile == AbOpcodeProfile.MaskFF) _summary.Text += ", $AB mask $FF";
             _mmc3Item.Enabled = _nes.Mapper is Mmc3;
             _mmc3StandardItem.Checked = _mmc3Item.Enabled && mmc3Revision == Mmc3IrqRevision.Standard;
             _mmc3AlternateItem.Checked = _mmc3Item.Enabled && mmc3Revision == Mmc3IrqRevision.Alternate;
@@ -360,6 +372,7 @@ public sealed class MainForm : Form, IMessageFilter
             _rewind = null;
             _romPath = null;
             _mmc3Item.Enabled = _mmc3StandardItem.Checked = _mmc3AlternateItem.Checked = false;
+            _abItem.Enabled = _abEeItem.Checked = _abFfItem.Checked = false;
             Stop();
             _pauseItem.Enabled = false;
             _summary.ForeColor = Warning;
@@ -375,7 +388,17 @@ public sealed class MainForm : Form, IMessageFilter
         if (_nes?.Mapper is not Mmc3 mapper || mapper.IrqRevision == revision || _romPath is null) return;
         bool resume = _running;
         _rewinding = false;
-        LoadRomWithRevision(_romPath, revision);
+        LoadRomWithRevision(_romPath, revision, _nes.Cpu.AbProfile);
+        if (!resume) Stop();
+    }
+
+    private void ChangeAbProfile(AbOpcodeProfile profile)
+    {
+        if (_nes is null || _romPath is null || _nes.Cpu.AbProfile == profile) return;
+        bool resume = _running;
+        Mmc3IrqRevision revision = _nes.Mapper is Mmc3 mapper ? mapper.IrqRevision : Mmc3IrqRevision.Standard;
+        _rewinding = false;
+        LoadRomWithRevision(_romPath, revision, profile);
         if (!resume) Stop();
     }
 

@@ -13,8 +13,10 @@ namespace NesEmulator.Core.Cpu;
 /// cycles for every processor cycle, and games lean on that ratio to change
 /// scroll registers partway down a frame.
 /// </summary>
-public sealed class Cpu6502(IBus bus)
+public sealed class Cpu6502(IBus bus, AbOpcodeProfile abProfile = AbOpcodeProfile.MaskEE)
 {
+    public AbOpcodeProfile AbProfile { get; } = Enum.IsDefined(abProfile)
+        ? abProfile : throw new ArgumentOutOfRangeException(nameof(abProfile));
     public const byte FlagCarry = 0x01;
     public const byte FlagZero = 0x02;
     public const byte FlagInterruptDisable = 0x04;
@@ -594,7 +596,7 @@ public sealed class Cpu6502(IBus bus)
 
             case Op.LAX:
                 // The immediate variant has the same unstable internal mask as XAA.
-                A = (byte)(Read(address) & (mode == Am.Immediate ? A | 0xEE : 0xFF));
+                A = (byte)(Read(address) & (mode == Am.Immediate ? A | (byte)AbProfile : 0xFF));
                 X = A;
                 SetZeroNegative(A);
                 break;
@@ -646,7 +648,7 @@ public sealed class Cpu6502(IBus bus)
 
             case Op.XAA:
                 // Unstable silicon behavior: use the 0xEE mask from the NES
-                // SingleStepTests model, also used for immediate LAX (0xAB).
+                // SingleStepTests model. The separate $AB profile does not alter XAA.
                 A = (byte)((A | 0xEE) & X & Read(address));
                 SetZeroNegative(A);
                 break;

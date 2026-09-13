@@ -323,6 +323,41 @@ internal static class DmaTests
             for (int i = 0; i < 300; i++) { expected.StepInstruction(); actual.StepInstruction(); }
             check($"state v8: DMC fixture after {steps} instructions continues identically", Save(actual).SequenceEqual(Save(expected)));
         }
+
+        {
+            // v9 wrote no $AB profile byte. Such a state was produced by a core
+            // that always used the $EE mask, so it may only load into that profile.
+            Nes expected = NewNes();
+            expected.Cpu.PC = 0x200;
+            expected.Bus.Write(0x200, 0x4C); expected.Bus.Write(0x201, 0); expected.Bus.Write(0x202, 2);
+            expected.Apu.WriteRegister(0x4010, 0x4F); expected.Apu.WriteRegister(0x4015, 0x10);
+            for (int i = 0; i < 20; i++) expected.StepInstruction();
+
+            byte[] Fixture()
+            {
+                using Stream resource = typeof(DmaTests).Assembly.GetManifestResourceStream("v9-dmc-20.state.gz")!;
+                using GZipStream gzip = new(resource, CompressionMode.Decompress);
+                using MemoryStream plain = new();
+                gzip.CopyTo(plain);
+                return plain.ToArray();
+            }
+
+            Nes actual = NewNes();
+            actual.LoadState(new MemoryStream(Fixture()));
+            check("state v9: the fixture migrates into the default $EE profile", Save(actual).SequenceEqual(Save(expected)));
+            for (int i = 0; i < 300; i++) { expected.StepInstruction(); actual.StepInstruction(); }
+            check("state v9: the migrated fixture continues identically", Save(actual).SequenceEqual(Save(expected)));
+
+            byte[] image = new byte[16 + 32768 + 8192];
+            image[0] = 0x4E; image[1] = 0x45; image[2] = 0x53; image[3] = 0x1A;
+            image[4] = 2; image[5] = 1;
+            Array.Fill(image, (byte)0x55, 16, 32768);
+            Nes other = new(Cartridge.FromBytes(image), abProfile: AbOpcodeProfile.MaskFF);
+            bool refused = false;
+            try { other.LoadState(new MemoryStream(Fixture())); }
+            catch (InvalidDataException) { refused = true; }
+            check("state v9: the fixture is refused by the $FF profile", refused);
+        }
     }
 
     private static byte[] Save(Nes nes) { using MemoryStream stream = new(); nes.SaveState(stream); return stream.ToArray(); }
