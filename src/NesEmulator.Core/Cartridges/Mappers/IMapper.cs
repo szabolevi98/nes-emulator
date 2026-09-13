@@ -11,6 +11,13 @@ public interface IMapper
     /// <summary>Handles the part of the processor address space above $4020.</summary>
     byte CpuRead(ushort address);
 
+    /// <summary>
+    /// Whether the board drives the data bus for this address. A cartridge only
+    /// answers the addresses it decodes; everything else leaves the bus floating,
+    /// so the processor reads back whatever was last carried on it.
+    /// </summary>
+    bool DrivesCpuRead(ushort address) => address >= 0x8000;
+
     void CpuWrite(ushort address, byte value);
 
     /// <summary>Handles the pattern tables, $0000 to $1FFF of the picture unit address space.</summary>

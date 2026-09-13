@@ -88,7 +88,9 @@ internal static class DmaTests
             rig.Cpu.DmaRead(0); // GET: the load DMA lands on LDA's data read
             Controller pad = port == 0x4016 ? rig.Nes.Port1 : rig.Nes.Port2;
             pad.Buttons = NesButton.B;
-            rig.Nes.Bus.Write(0x4016, 1); rig.Nes.Bus.Write(0x4016, 0);
+            // These writes bypass the processor, so no put cycle passes between
+            // them: sample the strobe by hand the way a real cycle would.
+            rig.Nes.Bus.Write(0x4016, 1); pad.SampleStrobe(); rig.Nes.Bus.Write(0x4016, 0);
             rig.StartDmc();
             rig.Cpu.Step();
             check($"DMA ${port:X4}: contiguous halted reads clock the pad once", (rig.Cpu.A & 1) == 1);
@@ -232,7 +234,9 @@ internal static class DmaTests
             Rig rig = Prime();
             Controller pad = port == 0x4016 ? rig.Nes.Port1 : rig.Nes.Port2;
             pad.Buttons = NesButton.B;
-            rig.Nes.Bus.Write(0x4016, 1); rig.Nes.Bus.Write(0x4016, 0);
+            // These writes bypass the processor, so no put cycle passes between
+            // them: sample the strobe by hand the way a real cycle would.
+            rig.Nes.Bus.Write(0x4016, 1); pad.SampleStrobe(); rig.Nes.Bus.Write(0x4016, 0);
             while (rig.Cpu.Cycles < halt - 3) rig.Cpu.DmaRead(0);
             rig.Nes.Apu.WriteRegister(0x4015, 0);
             while (rig.Cpu.Cycles < halt - 1) rig.Cpu.DmaRead(0);

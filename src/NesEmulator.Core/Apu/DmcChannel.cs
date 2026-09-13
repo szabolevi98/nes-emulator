@@ -50,6 +50,8 @@ public sealed class DmcChannel
 
     internal bool DmaPending => Active && _bufferEmpty && _dmaDelay is >= 0 and <= 1;
     internal bool NextCycleIsGet => !_getCycle;
+    /// <summary>Whether the cycle currently being clocked is a GET cycle.</summary>
+    internal bool OnGetCycle => _getCycle;
     internal ushort DmaAddress => _currentAddress;
 
     public void WriteControl(byte value)

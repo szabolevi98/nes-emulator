@@ -52,6 +52,8 @@ public sealed class Mmc1 : IMapper
         return 0;
     }
 
+    public bool DrivesCpuRead(ushort address) => address >= 0x6000;
+
     public void CpuWrite(ushort address, byte value)
     {
         if (address < 0x6000)

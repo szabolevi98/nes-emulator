@@ -46,12 +46,15 @@ public sealed class NesBus(
     /// can replace this page before the processor reaches the next read cycle.
     /// </summary>
     private int _dmaPage = -1;
-    // Transient while RunDma owns the bus. On NES-001, a controller's /OE stays
-    // asserted across contiguous stalled reads, so those reads clock it once.
-    private bool _dmaActive;
-    private ushort _dmaControllerAddress;
-    private byte _dmaControllerValue;
-    private bool _dmaResumeRead;
+
+    /// <summary>
+    /// The controller port read on the previous processor cycle, or zero. A port's
+    /// /OE only rises between reads of different addresses, so two contiguous reads
+    /// of the same port clock its shift register once and read the same bit twice.
+    /// This covers a read-modify-write's double read and DMA-stalled reads alike.
+    /// </summary>
+    private ushort _portAddress;
+    private byte _portValue;
 
     public int RunDma(Cpu6502 cpu) => RunDma(cpu, cpu.PC);
 
@@ -69,7 +72,6 @@ public sealed class NesBus(
         byte oamByte = 0;
         int offset = 0;
         int dmcStage = 0; // 0: inactive, 1: dummy, 2: waiting for GET
-        _dmaActive = true;
         try
         {
             while (oam || dmcStage != 0 || _apu.Dmc.DmaPending)
@@ -111,24 +113,22 @@ public sealed class NesBus(
         }
         finally
         {
-            _dmaActive = false;
             // An aborted halt may return straight to the same controller read,
-            // without a DMA fetch to deassert /OE between the two cycles.
-            _dmaResumeRead = _dmaControllerAddress != 0;
+            // without a DMA fetch to deassert /OE between the two cycles. That is
+            // the same contiguous-read rule the bus already tracks.
         }
         return (int)(cpu.Cycles - start);
     }
 
     public byte Read(ushort address)
     {
-        bool resume = _dmaResumeRead;
-        _dmaResumeRead = false;
-        if ((_dmaActive || resume) && _dmaControllerAddress != 0 && address == _dmaControllerAddress)
+        bool port = address is 0x4016 or 0x4017;
+        if (port && address == _portAddress)
         {
-            if (resume) _dmaControllerAddress = 0;
-            return _openBus = _dmaControllerValue;
+            // Still the same read as far as the port is concerned.
+            return _openBus = _portValue;
         }
-        _dmaControllerAddress = 0;
+
         byte value;
 
         if (address < 0x2000)
@@ -141,15 +141,19 @@ public sealed class NesBus(
         }
         else if (address == 0x4016)
         {
-            value = _port1.Read();
+            // Only the low data lines are driven by the port; the rest float.
+            value = (byte)((_openBus & 0xE0) | _port1.Read());
         }
         else if (address == 0x4017)
         {
-            value = _port2.Read();
+            value = (byte)((_openBus & 0xE0) | _port2.Read());
         }
         else if (address == 0x4015)
         {
-            value = _apu.ReadStatus();
+            // The 2A03 answers this one from inside the chip, so the external data
+            // bus is never driven: its unused bit reads back whatever was already
+            // on the bus, and the bus keeps that value for the following cycle.
+            return (byte)((_apu.ReadStatus() & 0xDF) | (_openBus & 0x20));
         }
         else if (address < 0x4020)
         {
@@ -157,22 +161,23 @@ public sealed class NesBus(
         }
         else
         {
-            value = _mapper.CpuRead(address);
+            // Nothing decodes this address on the cartridge: the bus floats and
+            // keeps whatever the previous cycle left on it.
+            value = _mapper.DrivesCpuRead(address) ? _mapper.CpuRead(address) : _openBus;
         }
 
         _openBus = value;
-        if (_dmaActive && address is 0x4016 or 0x4017)
-        {
-            _dmaControllerAddress = address;
-            _dmaControllerValue = value;
-        }
+        // Only a port keeps presenting its value; anything else releases /OE.
+        _portAddress = port ? address : (ushort)0;
+        _portValue = port ? value : (byte)0;
         return value;
     }
 
     public void Write(ushort address, byte value)
     {
-        _dmaResumeRead = false;
-        _dmaControllerAddress = 0;
+        // A write cycle deasserts every port's /OE, so the next read clocks again.
+        _portAddress = 0;
+        _portValue = 0;
         _openBus = value;
 
         if (address < 0x2000)
@@ -223,12 +228,18 @@ public sealed class NesBus(
         writer.Write(_ram);
         writer.Write(_openBus);
         writer.Write(_dmaPage);
+        writer.Write(_portAddress);
+        writer.Write(_portValue);
     }
 
-    internal void LoadState(BinaryReader reader)
+    internal void LoadState(BinaryReader reader, bool legacyPort)
     {
         reader.ReadExactly(_ram);
         _openBus = reader.ReadByte();
         _dmaPage = reader.ReadInt32();
+        // Older states were written between instructions, where no port read can
+        // be in progress, so starting with a deasserted /OE reproduces them.
+        _portAddress = legacyPort ? (ushort)0 : reader.ReadUInt16();
+        _portValue = legacyPort ? (byte)0 : reader.ReadByte();
     }
 }

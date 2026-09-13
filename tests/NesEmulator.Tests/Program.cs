@@ -1197,7 +1197,8 @@ foreach ((string fixture, int expectedCount) in new[]
 {
     Controller controller = new() { Buttons = NesButton.A | NesButton.Start };
 
-    controller.Write(1); // latch
+    controller.Write(1); // raise the strobe
+    controller.SampleStrobe(); // the load the get-to-put edge would perform
     controller.Write(0);
 
     // Buttons come out one at a time: A, B, Select, Start, Up, Down, Left, Right.
@@ -1981,6 +1982,7 @@ byte[] BuildBusyRom()
 
 RegressionTests.Run((name, pass) => Check(name, pass));
 DmaTests.Run((name, pass) => Check(name, pass));
+BusTests.Run((name, pass) => Check(name, pass));
 Mmc3RevisionTests.Run((name, pass) => Check(name, pass));
 Mmc3M2Tests.Run((name, pass) => Check(name, pass));
 SpriteEvaluationTests.Run((name, pass) => Check(name, pass));

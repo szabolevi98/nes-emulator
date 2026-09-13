@@ -152,16 +152,33 @@ The public blargg suites stay at 55/55, so this is added coverage rather than a 
 
 References: [AccuracyCoin](https://github.com/100thCoin/AccuracyCoin/tree/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e) and its [test source](https://github.com/100thCoin/AccuracyCoin/blob/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e/AccuracyCoin.asm), which documents what each test expects and why.
 
+## Open bus and the controller ports
+
+The twelfth milestone models the data bus itself instead of returning zero for everything nothing answers. AccuracyCoin goes from **112/144 to 115/144**: `Open Bus`, `Controller Strobing` and `Implied Dummy Reads` now pass, and the blargg suites are unchanged at 55/55, 16/16 and 2/2.
+
+A cartridge only drives the data lines for the addresses it decodes. Every board now says which those are, so a read of `$4020-$5FFF` on a board without work RAM leaves the bus floating and the processor reads back the last value it carried. That is usually the high byte of the address operand, which is why `LDA $5501` returns `$55`; an indexed read that crosses a page returns the *unfixed* high byte, because the extra read is open bus too and changes nothing.
+
+`$4015` is answered inside the 2A03 and never reaches the external bus. Reading it therefore leaves the bus alone — a following open-bus read still sees the older value — and its unused bit reads back whatever the bus was carrying. Writes always drive the bus, `$4015` included.
+
+The controller ports drive only their data lines. The three bits above them come from the bus, so `LDA $4016` reports `$40` in them while a dummy read through `$2006` leaves `$E0` there. The old fixed `$40` is gone.
+
+Two port behaviors are timing, not decoding. The parallel load is level triggered on the processor's get-to-put transition, so a one-cycle strobe — the `$41` then `$40` that `DEC $4016` writes — only reaches the shift register on one of the two alignments. And a port is clocked by its output enable rising, which does not happen between two contiguous reads of the same address: a read-modify-write's double read clocks the pad once, and so do the stalled reads of a DMA halt. The DMA-specific special case for that is gone; one rule now covers both.
+
+References: [open bus](https://www.nesdev.org/wiki/Open_bus_behavior), [controller port reads](https://www.nesdev.org/wiki/Standard_controller#Output_.28.244016.2F.244017_read.29), and AccuracyCoin's [`Open Bus`, `Controller Strobing` and `Controller Clocking` sources](https://github.com/100thCoin/AccuracyCoin/blob/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e/AccuracyCoin.asm).
+
+Still missing: the PPU's own open bus and its decay over time, and the DMC DMA's bus conflicts with the 2A03 registers.
+
 ## Validation and save compatibility
 
-- 701 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation, both `$AB` profiles and real v2–v9 state migration fixtures.
+- 712 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation, both `$AB` profiles and real v2–v9 state migration fixtures.
 - The complete baseline ROM report records the selected IRQ profiles and the `$AB` profile it ran under; DMA results are reported separately.
 - The complete AccuracyCoin collection is measured test by test, with every failure and error code listed.
 - 95 desktop input and menu checks.
+- Offline bus checks cover unmapped reads, `$4015`'s internal path, the port's undriven bits, the strobe alignment and contiguous port reads.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
-New saves use format v10, adding one header byte for the `$AB` profile. Existing v2–v9 saves remain loadable and are treated as `$EE`, the profile they were written under. Like the MMC3 revision, the profile is checked before any console state is touched: a state from the other profile is refused with a message naming it, because the two models produce different emulated results. A real v9 snapshot written by the previous serializer verifies both paths: it migrates into the `$EE` profile, replays identically for 300 further instructions, and is refused under `$FF`. Format v9 added five bytes for the pending DMC stop and output-reload age, and v2–v8 saves still start without a pending stop or recent output-boundary latch.
+New saves use format v11, adding the controller port's output-enable address and the value it is presenting. Format v10 added one header byte for the `$AB` profile. Existing v2–v9 saves remain loadable and are treated as `$EE`, the profile they were written under. Like the MMC3 revision, the profile is checked before any console state is touched: a state from the other profile is refused with a message naming it, because the two models produce different emulated results. A real v9 snapshot written by the previous serializer verifies both paths: it migrates into the `$EE` profile, replays identically for 300 further instructions, and is refused under `$FF`. Format v9 added five bytes for the pending DMC stop and output-reload age, and v2–v8 saves still start without a pending stop or recent output-boundary latch.
 
 v8 added 41 bytes for secondary OAM and the evaluation/fetch latches. Earlier formats have no partial sprite search: migration reconstructs it from saved primary OAM during evaluation, or retains the selected sprite data during fetch/blanking, preserving existing output shifters and status flags. Earlier OAM writes within that line cannot be reconstructed; v8 captures the actual partial state. Real v7 snapshots at dots 100 and 270 verify both migration paths.
 

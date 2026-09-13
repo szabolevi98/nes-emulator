@@ -13,7 +13,7 @@ The [noise period table](https://www.nesdev.org/wiki/APU_Noise) is converted to 
 
 ## Validation
 
-Run `dotnet run -c Release --project tests/NesEmulator.Tests` for the 701 offline checks. Audio regressions cover all 16 noise periods against a CPU-clocked reference sequence, DMC bit spacing, prefetch, looping and DMA, APU frame-counter reset and IRQ timing, and the following at both 44.1 and 48 kHz:
+Run `dotnet run -c Release --project tests/NesEmulator.Tests` for the 712 offline checks. Audio regressions cover all 16 noise periods against a CPU-clocked reference sequence, DMC bit spacing, prefetch, looping and DMA, APU frame-counter reset and IRQ timing, and the following at both 44.1 and 48 kHz:
 
 - A 1 kHz signal remains audible with the expected filter gain.
 - A 30 Hz signal is attenuated by the output high-pass filters.

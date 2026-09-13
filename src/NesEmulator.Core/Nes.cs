@@ -75,7 +75,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E0A; // "NES" and a format version
+    private const uint StateMagic = 0x53454E0B; // "NES" and a format version
+    private const uint AbStateMagic = 0x53454E0A;
     private const uint StopStateMagic = 0x53454E09;
     private const uint SpriteStateMagic = 0x53454E08;
     private const uint M2StateMagic = 0x53454E07;
@@ -132,9 +133,9 @@ public sealed class Nes
         bool legacy = magic == LegacyStateMagic;
         bool legacyApu = magic < ApuStateMagic;
         bool legacyDmc = magic < DmcStateMagic;
-        if (magic != StateMagic && magic != StopStateMagic && magic != SpriteStateMagic && magic != M2StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
+        if (magic != StateMagic && magic != AbStateMagic && magic != StopStateMagic && magic != SpriteStateMagic && magic != M2StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. A v2 through v10 state is required.");
+            throw new InvalidDataException("Unsupported save state format. A v2 through v11 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -153,7 +154,7 @@ public sealed class Nes
         if (revision != StateIrqRevision)
             throw new InvalidDataException("This save state uses a different MMC3 IRQ revision. Select that revision before loading it.");
 
-        AbOpcodeProfile abProfile = magic >= StateMagic ? (AbOpcodeProfile)reader.ReadByte() : AbOpcodeProfile.MaskEE;
+        AbOpcodeProfile abProfile = magic >= AbStateMagic ? (AbOpcodeProfile)reader.ReadByte() : AbOpcodeProfile.MaskEE;
         if (abProfile != Cpu.AbProfile)
             throw new InvalidDataException("This save state uses a different $AB opcode profile. Select that profile before loading it.");
 
@@ -168,27 +169,30 @@ public sealed class Nes
         bool legacyFilter = magic < M2StateMagic;
         bool legacySprites = magic < SpriteStateMagic;
         bool legacyStop = magic < StopStateMagic;
+        // v11 adds the controller port's /OE address and its presented value.
+        bool legacyPort = magic < StateMagic;
         // v7 adds one filter byte only for MMC3 cartridges.
         if (length != current.Length - (legacy ? 2 : 0) - (legacyApu ? 4 : 0) - (legacyDmc ? 7 : 0)
-            - (legacyFilter && Mapper is Mmc3 ? 1 : 0) - (legacySprites ? Ppu2C02.SpriteEvaluationStateSize : 0) - (legacyStop ? 5 : 0))
+            - (legacyFilter && Mapper is Mmc3 ? 1 : 0) - (legacySprites ? Ppu2C02.SpriteEvaluationStateSize : 0) - (legacyStop ? 5 : 0)
+            - (legacyPort ? 3 : 0))
             throw new InvalidDataException("The save state has an incompatible size.");
         byte[] checksum = reader.ReadBytes(32);
         byte[] data = reader.ReadBytes(length);
         if (data.Length != length || !checksum.AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(data)))
             throw new InvalidDataException("The save state is incomplete or damaged.");
 
-        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc, legacyFilter, legacySprites, legacyStop);
+        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc, legacyFilter, legacySprites, legacyStop, legacyPort);
     }
 
     private Mmc3IrqRevision StateIrqRevision => Mapper is Mmc3 mmc3
         ? mmc3.IrqRevision : Mmc3IrqRevision.Standard;
 
-    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc, bool legacyFilter, bool legacySprites, bool legacyStop)
+    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc, bool legacyFilter, bool legacySprites, bool legacyStop, bool legacyPort)
     {
         Cpu.LoadState(reader, legacy);
         bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy, legacySprites);
         Apu.LoadState(reader, legacyApu, legacyDmc, legacyStop);
-        Bus.LoadState(reader);
+        Bus.LoadState(reader, legacyPort);
         if (Mapper is Mmc3 mmc3) mmc3.LoadState(reader, legacyFilter, Ppu.Clock);
         else Mapper.LoadState(reader);
         Port1.LoadState(reader);
@@ -221,6 +225,13 @@ public sealed class Nes
     private void CompleteTick()
     {
         Ppu.Step();
+        // The ports load while the strobe is high, on the get-to-put transition.
+        if (Apu.Dmc.OnGetCycle)
+        {
+            Port1.SampleStrobe();
+            Port2.SampleStrobe();
+        }
+
         // Selected NTSC alignment: M2 falls after this cycle's final PPU dot,
         // before interrupt sampling. This path also runs during DMA and reset.
         Mapper.OnM2FallingEdge();

@@ -38,6 +38,9 @@ public sealed class Nrom : IMapper
         return 0;
     }
 
+    public bool DrivesCpuRead(ushort address) =>
+        address >= 0x8000 || (address >= 0x6000 && _prgRam.Length > 0);
+
     public void CpuWrite(ushort address, byte value)
     {
         // Writes above $8000 hit ROM and are discarded, exactly as on hardware.

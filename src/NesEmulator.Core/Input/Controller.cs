@@ -30,7 +30,19 @@ public sealed class Controller
 
     public void Write(byte value)
     {
+        // Raising the line does not itself load the register: the parallel load is
+        // level triggered and only takes effect while a put cycle ends. A one-cycle
+        // pulse therefore latches only when the write that raised it was a put.
         _strobe = (value & 0x01) != 0;
+    }
+
+    /// <summary>
+    /// The processor is crossing from a get cycle into a put cycle. The parallel
+    /// load happens on that edge, so a strobe raised on a put cycle and dropped
+    /// again on the next get cycle never reaches the shift register.
+    /// </summary>
+    internal void SampleStrobe()
+    {
         if (_strobe)
         {
             _shiftRegister = (byte)Buttons;
@@ -50,9 +62,9 @@ public sealed class Controller
         // A standard pad shifts in ones after its eight buttons are exhausted.
         _shiftRegister = (byte)((_shiftRegister >> 1) | 0x80);
 
-        // The upper bits are not driven; the wires keep the last value the bus had,
-        // which on this console reads back as $40.
-        return (byte)(bit | 0x40);
+        // Only the data line is driven. The expansion lines read back low on a
+        // plain controller, and the bus supplies the three bits above them.
+        return bit;
     }
 
     internal void SaveState(BinaryWriter writer)

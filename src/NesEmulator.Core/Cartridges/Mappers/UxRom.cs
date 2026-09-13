@@ -45,6 +45,9 @@ public sealed class UxRom : IMapper
         return 0;
     }
 
+    public bool DrivesCpuRead(ushort address) =>
+        address >= 0x8000 || (address >= 0x6000 && _prgRam.Length > 0);
+
     public void CpuWrite(ushort address, byte value)
     {
         if (address >= 0x8000)

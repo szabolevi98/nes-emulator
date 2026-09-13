@@ -19,7 +19,7 @@ The five Power On State entries print information rather than judging the consol
 | CPU Behavior | 4 | The B Flag | PASS | $01 | — |
 | CPU Behavior | 5 | Dummy read cycles | PASS | $01 | — |
 | CPU Behavior | 6 | Dummy write cycles | PASS | $01 | — |
-| CPU Behavior | 7 | Open Bus | FAIL (1) | $06 | 1 |
+| CPU Behavior | 7 | Open Bus | PASS | $01 | — |
 | CPU Behavior | 8 | All NOP instructions | PASS | $01 | — |
 | Addressing mode wraparound | 0 | Absolute Indexed | PASS | $01 | — |
 | Addressing mode wraparound | 1 | Zero Page Indexed | PASS | $01 | — |
@@ -112,14 +112,14 @@ The five Power On State entries print information rather than judging the consol
 | APU Tests | 3 | Frame Counter 4-step | PASS | $01 | — |
 | APU Tests | 4 | Frame Counter 5-step | PASS | $01 | — |
 | APU Tests | 5 | Delta Modulation Channel | PASS | $01 | — |
-| APU Tests | 6 | APU Register Activation | FAIL (1) | $06 | 1 |
-| APU Tests | 7 | Controller Strobing | FAIL (4) | $12 | 4 |
-| APU Tests | 8 | Controller Clocking | FAIL (2) | $0A | 2 |
+| APU Tests | 6 | APU Register Activation | FAIL (4) | $12 | 4 |
+| APU Tests | 7 | Controller Strobing | PASS | $01 | — |
+| APU Tests | 8 | Controller Clocking | FAIL (7) | $1E | 7 |
 | CPU Behavior 2 | 0 | Instruction Timing | PASS | $01 | — |
-| CPU Behavior 2 | 1 | Implied Dummy Reads | FAIL (4) | $12 | 4 |
+| CPU Behavior 2 | 1 | Implied Dummy Reads | PASS | $01 | — |
 | CPU Behavior 2 | 2 | Branch Dummy Reads | PASS | $01 | — |
 | CPU Behavior 2 | 3 | JSR Edge Cases | PASS | $01 | — |
-| CPU Behavior 2 | 4 | Internal Data Bus | FAIL (1) | $06 | 1 |
+| CPU Behavior 2 | 4 | Internal Data Bus | FAIL (2) | $0A | 2 |
 | Power On State | 0 | PPU Reset Flag | INFO | $00 | — |
 | Power On State | 1 | CPU RAM | INFO | $01 | — |
 | Power On State | 2 | CPU Registers | INFO | $01 | — |
@@ -162,11 +162,10 @@ The five Power On State entries print information rather than judging the consol
 | Advanced Sprite Evaluation | 2 | Frozen OAM2 Increment | FAIL (2) | $0A | 2 |
 | Advanced Sprite Evaluation | 3 | Misaligned OAM2 Address | FAIL (3) | $0E | 3 |
 
-112/144 judged tests passed. 5 informational entries are reported but not counted.
+115/144 judged tests passed. 5 informational entries are reported but not counted.
 
 ## Outstanding failures
 
-- CPU Behavior / Open Bus: FAIL (1)
 - Unofficial Instructions: SH* / $93   SHA indirect,Y: FAIL (7)
 - Unofficial Instructions: SH* / $9F   SHA absolute,Y: FAIL (7)
 - Unofficial Instructions: SH* / $9B   SHS absolute,Y: FAIL (7)
@@ -175,11 +174,9 @@ The five Power On State entries print information rather than judging the consol
 - CPU Interrupts / Interrupt flag latency: FAIL (14)
 - APU Registers and DMA tests / DMC DMA Bus Conflicts: FAIL (2)
 - APU Tests / Frame Counter IRQ: FAIL (7)
-- APU Tests / APU Register Activation: FAIL (1)
-- APU Tests / Controller Strobing: FAIL (4)
-- APU Tests / Controller Clocking: FAIL (2)
-- CPU Behavior 2 / Implied Dummy Reads: FAIL (4)
-- CPU Behavior 2 / Internal Data Bus: FAIL (1)
+- APU Tests / APU Register Activation: FAIL (4)
+- APU Tests / Controller Clocking: FAIL (7)
+- CPU Behavior 2 / Internal Data Bus: FAIL (2)
 - PPU Behavior / PPU Register Open Bus: FAIL (5)
 - PPU Behavior / Palette RAM Quirks: FAIL (6)
 - Sprite Evaluation / $2002 flag timing: FAIL (1)
