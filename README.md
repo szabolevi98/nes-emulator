@@ -35,12 +35,13 @@ Two things are measured here. One is a suite of 701 offline checks. The other is
 | Additional DMA suite | 2 / 2 | DMC/OAM collisions, transfer length and copied sprite data |
 | Additional sprite suites | 16 / 16 | 11 sprite-zero-hit ROMs and 5 overflow behavior/timing ROMs |
 | AccuracyCoin DMA stop subset | 3 / 3 | OAM overlap, explicit abort and implicit abort; late RP2A03G/H behavior |
+| **AccuracyCoin, complete collection** | **112 / 144** | Every test in the ROM, run individually; 5 informational entries are not counted |
 
 The MMC3 tests require two incompatible IRQ behaviors. The runner selects alternate MMC3A for `6-MMC3_alt` and standard MMC3 for the other five, recording each profile in the report. ROM bytes stay unchanged, and ordinary cartridge loading defaults to standard MMC3.
 
 The unstable `$AB` opcode (immediate LAX) has two different hardware reports behind it, so it is a selectable CPU profile rather than a single fixed answer: the `$EE` mask matches the [SingleStepTests vectors](https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502), the `$FF` mask matches blargg's `03-immediate` ROM. Neither model passes both measures: `$EE` costs that one ROM, `$FF` costs 4,422 of the 10,000 `ab` vectors. The ROM table above was measured with the `$FF` profile and the vector total with the default `$EE` profile; every report names the profile it ran under. The emulator defaults to `$EE`, and the menu offers `$FF` per ROM.
 
-DMA register conflicts, adjacent PPUDATA reads, OAM corruption and rendering-toggle quirks still need work. The separate [DMA report](docs/dma-results.md), [DMA stop report](docs/dma-stop-results.md) and [sprite report](docs/sprite-results.md) keep the original 55-ROM denominator stable. The three selected AccuracyCoin tests do not represent a complete run of that ROM.
+DMA register conflicts, adjacent PPUDATA reads, OAM corruption and rendering-toggle quirks still need work. The separate [DMA report](docs/dma-results.md), [DMA stop report](docs/dma-stop-results.md) and [sprite report](docs/sprite-results.md) keep the original 55-ROM denominator stable. The complete AccuracyCoin collection is now measured as well: 112 of its 144 judged tests pass, with no timeouts. The [itemized report](docs/accuracy-coin-results.md) names every remaining failure and its error code, and those failures are what the work log tracks next.
 
 Every result, failure message and ROM checksum is in the [full report](docs/accuracy-results.md), and the per-opcode vector results in the [CPU vector report](docs/cpu-vector-results.txt). Measured on Windows x64 with .NET 9 on 2026-09-13. The [cycle-accuracy work log](docs/cycle-accuracy.md) records the clock model, completed checks and next targets.
 
@@ -86,7 +87,10 @@ The DMA stop tests use a separately pinned AccuracyCoin ROM, driven through its 
 ```powershell
 ./tools/fetch-accuracy-tests.ps1 -IncludeAccuracyCoin
 dotnet run -c Release --project tests/NesEmulator.Tests -- --dma-abort-suite roms/accuracy-coin docs/dma-stop-results.md
+dotnet run -c Release --project tests/NesEmulator.Tests -- --coin-suite roms/accuracy-coin docs/accuracy-coin-results.md
 ```
+
+The second command runs the whole collection. It takes the page list, test order and result addresses from the ROM's own menu tables, so the report cannot drift from the cartridge, and each test runs from its own power-on.
 
 ## Running it
 

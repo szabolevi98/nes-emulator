@@ -16,9 +16,15 @@ internal static class AccuracyRunner
     {
         if (!TakeAbProfile(ref args)) return 2;
         if (args.Length >= 2 && args[0] == "--dma-abort-suite") return DmaAbortRunner.Run(args);
+        if (args.Length >= 2 && args[0] == "--coin-suite")
+        {
+            if (!Directory.Exists(args[1])) { Console.Error.WriteLine($"Directory does not exist: {args[1]}"); return 2; }
+            return CoinSuiteRunner.Run(args);
+        }
+
         if (args.Length < 2 || args[0] is not ("--rom-suite" or "--dma-suite" or "--sprite-suite" or "--cpu-vectors"))
         {
-            Console.Error.WriteLine("Usage: [--ab-profile ee|ff] --rom-suite|--dma-suite|--sprite-suite <nes-test-roms directory> [report.md] [path filter] | --dma-abort-suite <AccuracyCoin directory> [report.md] | --cpu-vectors <JSON directory>");
+            Console.Error.WriteLine("Usage: [--ab-profile ee|ff] --rom-suite|--dma-suite|--sprite-suite <nes-test-roms directory> [report.md] [path filter] | --dma-abort-suite|--coin-suite <AccuracyCoin directory> [report.md] [name filter] | --cpu-vectors <JSON directory>");
             return 2;
         }
 

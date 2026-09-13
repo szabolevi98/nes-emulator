@@ -130,10 +130,33 @@ The profile is chosen on the command line (`--ab-profile ee|ff`) or from **Emula
 
 References: [CPU unofficial opcodes](https://www.nesdev.org/wiki/CPU_unofficial_opcodes) and [programming with unofficial opcodes](https://www.nesdev.org/wiki/Programming_with_unofficial_opcodes) on the unstable constant, the [SingleStepTests NES vectors](https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502), and blargg's [`03-immediate` source](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/instr_test-v5/source).
 
+## The complete AccuracyCoin collection
+
+The eleventh milestone replaces the three hand-picked AccuracyCoin tests with the whole collection: **112 of 144** judged tests pass, none time out. Five further entries on the Power On State page print information instead of judging the console; the ROM leaves them out of its own tally and so does this one.
+
+The runner takes nothing on faith from this repository. It verifies the pinned ROM hash, then walks the cartridge's own menu tables — a pointer list at `$8100`, each page holding a title and `name, $FF, result address, routine address` entries — so the page list, the test order and every result slot come from the ROM image. Each test starts from its own power-on, is selected with controller input, and is judged only by the byte the ROM writes into its result slot. Nothing is patched, and no test name is special-cased.
+
+The 32 failures are not scattered: they cluster onto the gaps already on the work list.
+
+| Cluster | Failing tests |
+|---|---|
+| Open bus, on the cartridge and in the PPU | Open Bus, PPU Register Open Bus, Internal Data Bus, APU Register Activation |
+| Controller port timing | Controller Strobing, Controller Clocking |
+| `$2004`/OAM behavior during rendering | Address `$2004` behavior, `$2004` Stress Test, Misaligned OAM behavior, OAM Corruption, Arbitrary Sprite zero, `$2002` flag timing |
+| `$2007` during rendering | `$2007` read w/ rendering, `$2007` Stress Test |
+| Background and sprite shift registers | Stale BG Shift Registers, BG Serial In, ALE + Read, Hybrid Addresses, Sprites On Scanline 0, Stale Sprite Shift Regs, Frozen OAM2 Increment, Misaligned OAM2 Address |
+| Unstable store opcodes | SHA, SHS, SHY and SHX (`$93`, `$9F`, `$9B`, `$9C`, `$9E`) |
+| Remaining timing edges | Interrupt flag latency, Implied Dummy Reads, Frame Counter IRQ, DMC DMA Bus Conflicts, Palette RAM Quirks |
+
+The public blargg suites stay at 55/55, so this is added coverage rather than a regression: these are behaviors the older ROMs never exercised. The full table, with each ROM error code, is in [accuracy-coin-results.md](accuracy-coin-results.md).
+
+References: [AccuracyCoin](https://github.com/100thCoin/AccuracyCoin/tree/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e) and its [test source](https://github.com/100thCoin/AccuracyCoin/blob/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e/AccuracyCoin.asm), which documents what each test expects and why.
+
 ## Validation and save compatibility
 
 - 701 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation, both `$AB` profiles and real v2–v9 state migration fixtures.
 - The complete baseline ROM report records the selected IRQ profiles and the `$AB` profile it ran under; DMA results are reported separately.
+- The complete AccuracyCoin collection is measured test by test, with every failure and error code listed.
 - 95 desktop input and menu checks.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
