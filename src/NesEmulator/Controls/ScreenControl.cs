@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using NesEmulator.Core.Ppu;
@@ -21,6 +22,40 @@ public sealed class ScreenControl : Control
         PixelFormat.Format32bppRgb);
 
     private readonly int[] _pixels = new int[Ppu2C02.ScreenWidth * Ppu2C02.ScreenHeight];
+
+    /// <summary>
+    /// How much a television of the period hid behind its bezel. Games counted on
+    /// it: the edges of the picture are where a scrolling game's half-written tile
+    /// column and its sprites appearing out of nowhere were meant to be invisible.
+    /// </summary>
+    private const int Overscan = 8;
+
+    private bool _cropOverscan;
+
+    /// <summary>
+    /// Whether to show only what a television would have shown. Off by default,
+    /// because the emulator's job is to say what the console produced; this is a
+    /// display choice, and it throws real pixels away.
+    /// </summary>
+    [DefaultValue(false)]
+    public bool CropOverscan
+    {
+        get => _cropOverscan;
+        set
+        {
+            if (_cropOverscan == value)
+            {
+                return;
+            }
+
+            _cropOverscan = value;
+            Invalidate();
+        }
+    }
+
+    private Rectangle VisibleArea => _cropOverscan
+        ? new Rectangle(Overscan, Overscan, Ppu2C02.ScreenWidth - (2 * Overscan), Ppu2C02.ScreenHeight - (2 * Overscan))
+        : new Rectangle(0, 0, Ppu2C02.ScreenWidth, Ppu2C02.ScreenHeight);
 
     public ScreenControl()
     {
@@ -61,41 +96,43 @@ public sealed class ScreenControl : Control
         e.Graphics.PixelOffsetMode = PixelOffsetMode.Half;
         e.Graphics.Clear(BackColor);
 
+        Rectangle source = VisibleArea;
         Rectangle target = FitInside(ClientSize);
         if (target.Width > 0 && target.Height > 0)
         {
-            e.Graphics.DrawImage(_bitmap, target);
+            e.Graphics.DrawImage(_bitmap, target, source, GraphicsUnit.Pixel);
         }
     }
 
     /// <summary>Largest centred rectangle of the right shape that fits the control.</summary>
-    private static Rectangle FitInside(Size available)
+    private Rectangle FitInside(Size available)
     {
         if (available.Width <= 0 || available.Height <= 0)
         {
             return Rectangle.Empty;
         }
 
+        Rectangle visible = VisibleArea;
         int scale = Math.Min(
-            available.Width / Ppu2C02.ScreenWidth,
-            available.Height / Ppu2C02.ScreenHeight);
+            available.Width / visible.Width,
+            available.Height / visible.Height);
 
         int width;
         int height;
 
         if (scale >= 1)
         {
-            width = Ppu2C02.ScreenWidth * scale;
-            height = Ppu2C02.ScreenHeight * scale;
+            width = visible.Width * scale;
+            height = visible.Height * scale;
         }
         else
         {
             // Smaller than one to one: keep the shape and accept the resampling.
             double factor = Math.Min(
-                (double)available.Width / Ppu2C02.ScreenWidth,
-                (double)available.Height / Ppu2C02.ScreenHeight);
-            width = (int)(Ppu2C02.ScreenWidth * factor);
-            height = (int)(Ppu2C02.ScreenHeight * factor);
+                (double)available.Width / visible.Width,
+                (double)available.Height / visible.Height);
+            width = (int)(visible.Width * factor);
+            height = (int)(visible.Height * factor);
         }
 
         return new Rectangle(

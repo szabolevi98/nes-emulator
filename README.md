@@ -53,7 +53,7 @@ The table above is the bar the field uses, and it is met. [AccuracyCoin](https:/
 
 ```
 dotnet run --project tests/NesEmulator.Tests      # 779 offline checks
-dotnet run --project tests/NesEmulator.UiTests    # 95 input and menu checks
+dotnet run --project tests/NesEmulator.UiTests    # 100 input and menu checks
 ```
 
 ```
@@ -123,6 +123,8 @@ Open a cartridge with **File → Open ROM**, or drop one on the window. `roms/de
 | Debugger | F12 |
 
 **Help → Controls** lists the same bindings in the app. Controller keys work even when a debugger control has focus; switching away from the emulator releases both controllers so buttons cannot stick.
+
+**View → Crop overscan** hides the eight pixels at each edge, the way a television of the period hid them behind its bezel. It is off by default. The blank strip a scrolling game leaves down the left of the screen is not a fault: the picture unit can be told to hold the leftmost eight pixels back, and games do that to cover the tile column being rewritten as the level scrolls in, and the sprites that would otherwise appear out of nowhere at the edge.
 
 For mapper 4 cartridges, **Emulation → MMC3 IRQ revision (restarts ROM)** selects standard MMC3B/C or alternate MMC3A behavior. Changing it restarts the cartridge and clears rewind history, preserving pause. Opening another ROM starts with the standard profile. Saves retain the chosen revision and must be loaded with that same selection; older v2–v5 saves use standard MMC3.
 

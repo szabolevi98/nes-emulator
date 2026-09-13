@@ -98,6 +98,26 @@ not something to guess at: NES 2.0 submapper 2 says a cartridge behaves that
 way, and anything else is taken as the ordinary case, since ANDing a write a
 game did not expect to be ANDed sends it to the wrong bank.
 
+## The blank strip down the left
+
+Start a scrolling game and eight pixels at the left of the screen stay one flat
+colour. It looks like a fault and is not: two bits in `$2001` tell the picture
+unit to hold the leftmost eight pixels of the background and of the sprites
+back, and those pixels then show the backdrop colour, whatever palette entry
+zero happens to be.
+
+Games ask for it because the left edge is where the seams are. A scrolling level
+is drawn tile by tile, and the column being written as the level comes in can be
+caught half updated. Sprites have it worse: their X coordinate has no negative
+values, so something entering from the left cannot slide in a pixel at a time —
+it would appear all at once. Hiding eight pixels covers both.
+
+On a television of the period nobody saw the strip at all; the bezel took rather
+more than that off every edge. It is only visible because a modern window shows
+all 256 by 240 pixels honestly. **View → Crop overscan** restores the old view
+for anyone who prefers it, and stays off by default: what the console produced
+is the thing this emulator is for.
+
 ## A cartridge that watches the screen being drawn
 
 Most boards only ever hear from the game. The MMC2 listens to the picture unit

@@ -64,6 +64,7 @@ public sealed class MainForm : Form, IMessageFilter
     private readonly ToolStripMenuItem _abItem;
     private readonly ToolStripMenuItem _abEeItem;
     private readonly ToolStripMenuItem _abFfItem;
+    private readonly ToolStripMenuItem _overscanItem;
     private readonly float[] _audioBuffer = new float[4096];
     private WaveOutPlayer? _audio;
 
@@ -242,7 +243,19 @@ public sealed class MainForm : Form, IMessageFilter
             CheckOnClick = false,
         };
 
+        _overscanItem = new ToolStripMenuItem("Crop &overscan", null, (sender, _) =>
+        {
+            _screen.CropOverscan = ((ToolStripMenuItem)sender!).Checked;
+        })
+        {
+            CheckOnClick = true,
+            Checked = false,
+            ToolTipText = "Hide the eight pixels at each edge, the way a television of the period did.",
+        };
+
         view.DropDownItems.Add(debuggerItem);
+        view.DropDownItems.Add(new ToolStripSeparator());
+        view.DropDownItems.Add(_overscanItem);
 
         ToolStripMenuItem help = new("&Help");
         help.DropDownItems.Add(new ToolStripMenuItem("&Controls...", null, (_, _) =>

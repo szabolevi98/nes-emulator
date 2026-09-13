@@ -1,5 +1,6 @@
 using System.Reflection;
 using NesEmulator;
+using NesEmulator.Controls;
 using NesEmulator.Core;
 using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Cpu;
@@ -95,12 +96,62 @@ internal static class Program
         Check("F1 remains available to Save State", !Send(screen, Keys.F1, true));
         CheckMapperMenu(form, rom);
         CheckAbProfileMenu(form, rom);
+        CheckOverscanMenu(form);
         form.Dispose();
         using Form survivor = new();
         Check("disposing emulator removes its filter", !Send(survivor, Keys.Enter, true));
 
         Console.WriteLine($"{_total - _failures}/{_total} UI input checks passed.");
         return _failures == 0 ? 0 : 1;
+    }
+
+    private static void CheckOverscanMenu(MainForm form)
+    {
+        object Field(string name) => typeof(MainForm).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
+        ToolStripMenuItem item = (ToolStripMenuItem)Field("_overscanItem");
+        Control screen = (Control)Field("_screen");
+        PropertyInfo crop = screen.GetType().GetProperty("CropOverscan")!;
+
+        Check("overscan cropping is off until asked for", !item.Checked && !(bool)crop.GetValue(screen)!);
+        item.PerformClick();
+        Check("the View item turns cropping on", item.Checked && (bool)crop.GetValue(screen)!);
+        item.PerformClick();
+        Check("and turns it off again", !item.Checked && !(bool)crop.GetValue(screen)!);
+
+        // The flag is only half of it: check what actually reaches the bitmap. A
+        // separate control is used rather than the form's, which is docked and
+        // would fight over its own size. The frame is built so the eight pixels a
+        // television would have hidden are white and everything else is black, so
+        // one pixel says which of the two views is being drawn.
+        ushort[] frame = new ushort[256 * 240];
+        for (int y = 0; y < 240; y++)
+        {
+            for (int index = 0; index < 256; index++)
+            {
+                bool edge = index < 8 || index >= 248 || y < 8 || y >= 232;
+                frame[(y * 256) + index] = (ushort)(edge ? 0x30 : 0x0F); // white edge, black middle
+            }
+        }
+
+        using ScreenControl painter = new();
+        painter.Present(frame);
+
+        painter.Size = new Size(256, 240);
+        using (Bitmap whole = new(painter.Width, painter.Height))
+        {
+            painter.DrawToBitmap(whole, new Rectangle(0, 0, painter.Width, painter.Height));
+            Check("the uncropped view starts at the console's first pixel",
+                whole.GetPixel(0, 0).R > 0xC0 && whole.GetPixel(128, 120).R < 0x40);
+        }
+
+        painter.CropOverscan = true;
+        painter.Size = new Size(240, 224);
+        using (Bitmap cropped = new(painter.Width, painter.Height))
+        {
+            painter.DrawToBitmap(cropped, new Rectangle(0, 0, painter.Width, painter.Height));
+            Check("cropping drops the eight pixels at every edge",
+                cropped.GetPixel(0, 0).R < 0x40 && cropped.GetPixel(239, 223).R < 0x40);
+        }
     }
 
     private static void CheckMapperMenu(MainForm form, byte[] rom)
