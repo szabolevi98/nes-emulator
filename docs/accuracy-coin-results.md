@@ -153,16 +153,16 @@ The five Power On State entries print information rather than judging the consol
 | PPU Misc. | 5 | $2004 Stress Test | FAIL (2) | $0A | 2 |
 | PPU Misc. | 6 | $2007 Stress Test | FAIL (2) | $0A | 2 |
 | Advanced Background Evaluation | 0 | Attributes As Tiles | PASS | $01 | — |
-| Advanced Background Evaluation | 1 | Stale BG Shift Registers | FAIL (4) | $12 | 4 |
+| Advanced Background Evaluation | 1 | Stale BG Shift Registers | PASS | $01 | — |
 | Advanced Background Evaluation | 2 | BG Serial In | FAIL (2) | $0A | 2 |
 | Advanced Background Evaluation | 3 | ALE + Read | FAIL (2) | $0A | 2 |
 | Advanced Background Evaluation | 4 | Hybrid Addresses | FAIL (2) | $0A | 2 |
 | Advanced Sprite Evaluation | 0 | Sprites On Scanline 0 | FAIL (2) | $0A | 2 |
-| Advanced Sprite Evaluation | 1 | Stale Sprite Shift Regs | FAIL (3) | $0E | 3 |
+| Advanced Sprite Evaluation | 1 | Stale Sprite Shift Regs | FAIL (5) | $16 | 5 |
 | Advanced Sprite Evaluation | 2 | Frozen OAM2 Increment | FAIL (2) | $0A | 2 |
 | Advanced Sprite Evaluation | 3 | Misaligned OAM2 Address | FAIL (3) | $0E | 3 |
 
-123/144 judged tests passed. 5 informational entries are reported but not counted.
+124/144 judged tests passed. 5 informational entries are reported but not counted.
 
 ## Outstanding failures
 
@@ -179,11 +179,10 @@ The five Power On State entries print information rather than judging the consol
 - Sprite Evaluation / OAM Corruption: FAIL (2)
 - PPU Misc. / $2004 Stress Test: FAIL (2)
 - PPU Misc. / $2007 Stress Test: FAIL (2)
-- Advanced Background Evaluation / Stale BG Shift Registers: FAIL (4)
 - Advanced Background Evaluation / BG Serial In: FAIL (2)
 - Advanced Background Evaluation / ALE + Read: FAIL (2)
 - Advanced Background Evaluation / Hybrid Addresses: FAIL (2)
 - Advanced Sprite Evaluation / Sprites On Scanline 0: FAIL (2)
-- Advanced Sprite Evaluation / Stale Sprite Shift Regs: FAIL (3)
+- Advanced Sprite Evaluation / Stale Sprite Shift Regs: FAIL (5)
 - Advanced Sprite Evaluation / Frozen OAM2 Increment: FAIL (2)
 - Advanced Sprite Evaluation / Misaligned OAM2 Address: FAIL (3)

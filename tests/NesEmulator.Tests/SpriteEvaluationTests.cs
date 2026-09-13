@@ -167,6 +167,34 @@ internal static class SpriteEvaluationTests
             check($"state v7: next-line sprites survive migration from dot {dot}",
                 nes.Ppu.FrameBuffer.AsSpan(11 * 256, 72).ToArray().Count(b => b == 0x21) == 64);
         }
+
+        {
+            // The counter that waits out a sprite's X position is not halted by
+            // forced blanking, so switching the picture off for part of a line
+            // leaves the sprite in the column it would have had anyway.
+            int FirstSpritePixel(bool blank)
+            {
+                Nes nes = Machine();
+                for (int i = 1; i < 9; i++) nes.Ppu.WriteOam((byte)(i * 4), 255); // sprite zero only
+                nes.Ppu.WriteOam(3, 100);                                         // at X = 100
+
+                At(nes.Ppu, 11, 0);
+                while (nes.Ppu.Scanline == 11)
+                {
+                    if (blank && nes.Ppu.Cycle == 10) nes.Ppu.WriteRegister(0x2001, 0x00);
+                    if (blank && nes.Ppu.Cycle == 50) nes.Ppu.WriteRegister(0x2001, 0x14);
+                    nes.Ppu.Step();
+                }
+
+                ReadOnlySpan<byte> line = nes.Ppu.FrameBuffer.AsSpan(11 * 256, 256);
+                return line.IndexOf((byte)0x21);
+            }
+
+            int plain = FirstSpritePixel(blank: false);
+            int blanked = FirstSpritePixel(blank: true);
+            check($"sprite units: forced blanking does not move where a sprite lands (drawn at {plain}, then {blanked})",
+                plain == 100 && blanked == 100);
+        }
     }
 
     private static Nes Machine()

@@ -481,6 +481,10 @@ public sealed class Ppu2C02
                 StepBackgroundFetch();
                 StepSprites();
             }
+            else
+            {
+                ClockSpriteUnits(rendering: false);
+            }
         }
 
         if (Scanline == ScreenHeight + 1 && Cycle == 1)
@@ -717,19 +721,35 @@ public sealed class Ppu2C02
 
         if (Cycle >= 321 || Cycle == 0) _oamData = _secondaryOam[0];
 
-        if (Cycle >= 2 && Cycle < 257)
+        ClockSpriteUnits(rendering: true);
+    }
+
+    /// <summary>
+    /// Clocks each output unit once.
+    ///
+    /// The counter that waits out a sprite's X position runs off the dot and keeps
+    /// going through forced blanking: switching the picture off for part of a line
+    /// does not move where the sprite lands. The shifter behind it only moves
+    /// while rendering, so a sprite caught half drawn stays where it is and
+    /// resumes there when the picture comes back.
+    /// </summary>
+    private void ClockSpriteUnits(bool rendering)
+    {
+        if (Cycle < 2 || Cycle >= 257)
         {
-            for (int i = 0; i < _lineSpriteCount; i++)
+            return;
+        }
+
+        for (int i = 0; i < _lineSpriteCount; i++)
+        {
+            if (_lineSprites[(i * 4) + 3] > 0)
             {
-                if (_lineSprites[(i * 4) + 3] > 0)
-                {
-                    _lineSprites[(i * 4) + 3]--;
-                }
-                else
-                {
-                    _spriteShiftLow[i] <<= 1;
-                    _spriteShiftHigh[i] <<= 1;
-                }
+                _lineSprites[(i * 4) + 3]--;
+            }
+            else if (rendering)
+            {
+                _spriteShiftLow[i] <<= 1;
+                _spriteShiftHigh[i] <<= 1;
             }
         }
     }
