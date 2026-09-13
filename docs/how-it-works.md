@@ -29,6 +29,19 @@ Two kilobytes of name table memory has to cover four screens, so the cartridge w
 
 Cartridges also see PPU addresses that never become completed reads. The aborted pattern fetch at the end of a line changes A12 and affects MMC3 interrupt counting. It is sent to the mapper's address observer without reading CHR data; the odd pre-render skip omits it along with the skipped dot.
 
+## Colour that is not a palette entry
+
+The three high bits of the mask register are the one part of the picture that no
+palette table can express. They do not brighten a channel; they hold the other
+two back, because the signal spends longer at the emphasised phase and the rest
+come out dimmer. Setting all three darkens the picture rather than lighting it.
+
+Games use this for a screen-wide flash, for tinting everything while under
+water, and for the frame a hit lands on. Because it can change partway down a
+frame, the setting belongs to the pixel rather than to the frame: each entry in
+the finished picture carries its palette index in the low six bits and the
+emphasis in force when the beam passed in the three above it.
+
 ## Why the sound is not a sum
 
 Five channels — two square waves, a triangle, a noise generator and a sample player — feed a resistor ladder rather than an adder. The result is not linear: a loud channel compresses the others, so the same note is quieter in a busy passage than in a bare one. Adding the channels together instead is the usual reason an emulator sounds harsh and thin, so the mixer here uses the published approximations of that ladder.

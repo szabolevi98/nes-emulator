@@ -91,8 +91,13 @@ public sealed class Ppu2C02
         Scanline = PreRenderScanline;
     }
 
-    /// <summary>One palette index per pixel, ready for a display to colour in.</summary>
-    public byte[] FrameBuffer { get; } = new byte[ScreenWidth * ScreenHeight];
+    /// <summary>
+    /// One pixel per entry, ready for a display to colour in: the palette index in
+    /// the low six bits and the emphasis setting that was in force when the beam
+    /// passed in the three above it. Emphasis is recorded per pixel because a game
+    /// is free to change it partway down a frame.
+    /// </summary>
+    public ushort[] FrameBuffer { get; } = new ushort[ScreenWidth * ScreenHeight];
 
     public int Scanline { get; private set; }
 
@@ -183,7 +188,7 @@ public sealed class Ppu2C02
         writer.Write(Scanline);
         writer.Write(Cycle);
         writer.Write(FrameCount);
-        writer.Write(FrameBuffer);
+        foreach (ushort pixel in FrameBuffer) writer.Write(pixel);
         writer.Write(_secondaryOam);
         writer.Write(_evalN); writer.Write(_evalM); writer.Write(_secondaryIndex);
         writer.Write(_nextSpriteCount); writer.Write(_oamData);
@@ -191,7 +196,7 @@ public sealed class Ppu2C02
         writer.Write(_evalDone); writer.Write(_nextSpriteZero);
     }
 
-    internal bool LoadState(BinaryReader reader, bool legacy = false, bool legacySprites = false, bool legacyBusDecay = false)
+    internal bool LoadState(BinaryReader reader, bool legacy = false, bool legacySprites = false, bool legacyBusDecay = false, bool legacyEmphasis = false)
     {
         reader.ReadExactly(_vram);
         reader.ReadExactly(_paletteRam);
@@ -236,7 +241,7 @@ public sealed class Ppu2C02
 
         // The picture is part of the state so that loading mid-frame does not show
         // half of the old one and half of the new.
-        reader.ReadExactly(FrameBuffer);
+        for (int i = 0; i < FrameBuffer.Length; i++) FrameBuffer[i] = legacyEmphasis ? reader.ReadByte() : reader.ReadUInt16();
         if (legacySprites)
         {
             // Batched evaluation had no in-flight state. Rebuild the next-line
@@ -893,7 +898,7 @@ public sealed class Ppu2C02
 
     // --------------------------------------------------------- pixel output
 
-    private byte ComposePixel()
+    private ushort ComposePixel()
     {
         int backgroundPixel = 0;
         int backgroundPalette = 0;
@@ -973,7 +978,11 @@ public sealed class Ppu2C02
         byte colour = ReadPalette((ushort)(0x3F00 + (paletteValue << 2) + pixelValue));
 
         // The grayscale bit masks the hue away and keeps only the brightness.
-        return (_mask & 0x01) != 0 ? (byte)(colour & 0x30) : colour;
+        byte index = (_mask & 0x01) != 0 ? (byte)(colour & 0x30) : colour;
+
+        // The emphasis bits belong to the pixel, not to the frame: a game can move
+        // them mid-screen, and the display has to honour where they changed.
+        return (ushort)(index | ((_mask & 0xE0) >> 5 << 6));
     }
 
     // -------------------------------------------------- picture address space

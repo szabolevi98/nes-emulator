@@ -75,7 +75,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E0C; // "NES" and a format version
+    private const uint StateMagic = 0x53454E0D; // "NES" and a format version
+    private const uint BusStateMagic = 0x53454E0C;
     private const uint PortStateMagic = 0x53454E0B;
     private const uint AbStateMagic = 0x53454E0A;
     private const uint StopStateMagic = 0x53454E09;
@@ -134,9 +135,9 @@ public sealed class Nes
         bool legacy = magic == LegacyStateMagic;
         bool legacyApu = magic < ApuStateMagic;
         bool legacyDmc = magic < DmcStateMagic;
-        if (magic != StateMagic && magic != PortStateMagic && magic != AbStateMagic && magic != StopStateMagic && magic != SpriteStateMagic && magic != M2StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
+        if (magic != StateMagic && magic != BusStateMagic && magic != PortStateMagic && magic != AbStateMagic && magic != StopStateMagic && magic != SpriteStateMagic && magic != M2StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. A v2 through v12 state is required.");
+            throw new InvalidDataException("Unsupported save state format. A v2 through v13 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -174,27 +175,29 @@ public sealed class Nes
         bool legacyPort = magic < PortStateMagic;
         // v12 adds a decay stamp for each of the picture unit's data lines and
         // the 2A03's own data bus.
-        bool legacyBusDecay = magic < StateMagic;
+        bool legacyBusDecay = magic < BusStateMagic;
+        // v13 widens each pixel to carry the emphasis bits alongside its colour.
+        bool legacyEmphasis = magic < StateMagic;
         // v7 adds one filter byte only for MMC3 cartridges.
         if (length != current.Length - (legacy ? 2 : 0) - (legacyApu ? 4 : 0) - (legacyDmc ? 7 : 0)
             - (legacyFilter && Mapper is Mmc3 ? 1 : 0) - (legacySprites ? Ppu2C02.SpriteEvaluationStateSize : 0) - (legacyStop ? 5 : 0)
-            - (legacyPort ? 3 : 0) - (legacyBusDecay ? 65 : 0))
+            - (legacyPort ? 3 : 0) - (legacyBusDecay ? 65 : 0) - (legacyEmphasis ? Ppu2C02.ScreenWidth * Ppu2C02.ScreenHeight : 0))
             throw new InvalidDataException("The save state has an incompatible size.");
         byte[] checksum = reader.ReadBytes(32);
         byte[] data = reader.ReadBytes(length);
         if (data.Length != length || !checksum.AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(data)))
             throw new InvalidDataException("The save state is incomplete or damaged.");
 
-        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc, legacyFilter, legacySprites, legacyStop, legacyPort, legacyBusDecay);
+        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc, legacyFilter, legacySprites, legacyStop, legacyPort, legacyBusDecay, legacyEmphasis);
     }
 
     private Mmc3IrqRevision StateIrqRevision => Mapper is Mmc3 mmc3
         ? mmc3.IrqRevision : Mmc3IrqRevision.Standard;
 
-    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc, bool legacyFilter, bool legacySprites, bool legacyStop, bool legacyPort, bool legacyBusDecay)
+    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc, bool legacyFilter, bool legacySprites, bool legacyStop, bool legacyPort, bool legacyBusDecay, bool legacyEmphasis)
     {
         Cpu.LoadState(reader, legacy);
-        bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy, legacySprites, legacyBusDecay);
+        bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy, legacySprites, legacyBusDecay, legacyEmphasis);
         Apu.LoadState(reader, legacyApu, legacyDmc, legacyStop);
         Bus.LoadState(reader, legacyPort, legacyBusDecay);
         if (Mapper is Mmc3 mmc3) mmc3.LoadState(reader, legacyFilter, Ppu.Clock);

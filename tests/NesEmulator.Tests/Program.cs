@@ -1124,7 +1124,7 @@ foreach ((string fixture, int expectedCount) in new[]
         nes.RunFrame();
     }
 
-    byte[] screen = nes.Ppu.FrameBuffer;
+    ushort[] screen = nes.Ppu.FrameBuffer;
     bool tileDrawn = true;
     for (int y = 0; y < 8 && tileDrawn; y++)
     {
@@ -1156,6 +1156,36 @@ foreach ((string fixture, int expectedCount) in new[]
         screen[(239 * 256) + 255] == 0x0F, $"got {screen[(239 * 256) + 255]:X2}");
     Check("render: three frames were produced", nes.Ppu.FrameCount >= 3,
         $"got {nes.Ppu.FrameCount}");
+
+    // The three high bits of the mask travel with the pixel, because a game is
+    // free to change them partway down a frame.
+    nes.Ppu.WriteRegister(0x2001, 0x08 | 0x20); // background on, emphasise red
+    nes.RunFrame();
+    nes.RunFrame();
+    Check("emphasis: the setting is recorded in the pixel",
+        (nes.Ppu.FrameBuffer[16] >> 6) == 1 && (nes.Ppu.FrameBuffer[16] & 0x3F) == 0x0F,
+        $"got {nes.Ppu.FrameBuffer[16]:X4}");
+}
+
+{
+    // Emphasis holds two channels back rather than lifting the third.
+    int plain = NesPalette.Emphasized[0x30];                 // white, no emphasis
+    int red = NesPalette.Emphasized[(1 << 6) | 0x30];        // white, red emphasised
+    int all = NesPalette.Emphasized[(7 << 6) | 0x30];        // white, all three
+
+    int R(int c) => (c >> 16) & 0xFF;
+    int G(int c) => (c >> 8) & 0xFF;
+    int B(int c) => c & 0xFF;
+
+    Check("emphasis: the emphasised channel is left alone", R(red) == R(plain),
+        $"{R(plain)} became {R(red)}");
+    Check("emphasis: the other two are held back",
+        G(red) < G(plain) && B(red) < B(plain), $"{G(plain)},{B(plain)} became {G(red)},{B(red)}");
+    Check("emphasis: all three set simply darkens the picture",
+        R(all) < R(plain) && G(all) < G(plain) && B(all) < B(plain),
+        $"{R(plain)},{G(plain)},{B(plain)} became {R(all)},{G(all)},{B(all)}");
+    Check("emphasis: no emphasis leaves the palette untouched",
+        NesPalette.Emphasized[0x16] == NesPalette.Rgb[0x16]);
 }
 
 // ------------------------------------------------------------- sprite memory
@@ -1842,7 +1872,7 @@ byte[] BuildBusyRom()
         nes.RunFrame();
     }
 
-    byte[] first = nes.Ppu.FrameBuffer.ToArray();
+    ushort[] first = nes.Ppu.FrameBuffer.ToArray();
     long firstCycles = nes.Cpu.Cycles;
 
     state.Position = 0;

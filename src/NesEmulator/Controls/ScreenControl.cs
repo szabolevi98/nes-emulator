@@ -30,11 +30,12 @@ public sealed class ScreenControl : Control
     }
 
     /// <summary>Converts a frame of palette indices and asks for a repaint.</summary>
-    public void Present(byte[] frame)
+    public void Present(ushort[] frame)
     {
         for (int i = 0; i < _pixels.Length; i++)
         {
-            _pixels[i] = NesPalette.Rgb[frame[i] & 0x3F];
+            // Colour and emphasis travel together in each entry.
+            _pixels[i] = NesPalette.Emphasized[frame[i] & 0x1FF];
         }
 
         BitmapData data = _bitmap.LockBits(

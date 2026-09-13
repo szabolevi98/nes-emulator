@@ -127,7 +127,7 @@ internal static class SpriteEvaluationTests
             check("sprite output: X counters run while only backgrounds are shown", nes.Ppu.FrameBuffer[11 * 256 + 8] == 0x21);
         }
         {
-            byte[] Frame(bool hideBackground)
+            ushort[] Frame(bool hideBackground)
             {
                 Nes nes = Machine();
                 nes.Ppu.WriteRegister(0x2006, 0x3F); nes.Ppu.WriteRegister(0x2006, 1);
@@ -139,7 +139,7 @@ internal static class SpriteEvaluationTests
                 At(nes.Ppu, 0, 33);
                 return nes.Ppu.FrameBuffer.AsSpan(8, 24).ToArray();
             }
-            byte[] reference = Frame(false);
+            ushort[] reference = Frame(false);
             check("background output: shifters run while only sprites are shown",
                 reference.All(b => b == 0x12) && Frame(true).SequenceEqual(reference));
         }
@@ -186,8 +186,8 @@ internal static class SpriteEvaluationTests
                     nes.Ppu.Step();
                 }
 
-                ReadOnlySpan<byte> line = nes.Ppu.FrameBuffer.AsSpan(11 * 256, 256);
-                return line.IndexOf((byte)0x21);
+                ReadOnlySpan<ushort> line = nes.Ppu.FrameBuffer.AsSpan(11 * 256, 256);
+                return line.IndexOf((ushort)0x21);
             }
 
             int plain = FirstSpritePixel(blank: false);

@@ -22,4 +22,43 @@ public static class NesPalette
         0xECEEEC, 0xA8CCEC, 0xBCBCEC, 0xD4B2EC, 0xECAEEC, 0xECAED4, 0xECB4B0, 0xE4C490,
         0xCCD278, 0xB4DE78, 0xA8E290, 0x98E2B4, 0xA0D6E4, 0xA0A2A0, 0x000000, 0x000000,
     ];
+
+    /// <summary>
+    /// The same colours under each of the eight emphasis settings, indexed as
+    /// <c>emphasis &lt;&lt; 6 | colour</c>.
+    ///
+    /// The three high bits of the mask register do not brighten a channel so much
+    /// as hold the other two back: the signal spends longer at the emphasised
+    /// phase and the rest come out dimmer. Games use it for a screen-wide flash,
+    /// for going under water, and for the moment a hit lands. With all three set
+    /// the picture simply darkens.
+    /// </summary>
+    public static readonly int[] Emphasized = BuildEmphasized();
+
+    private const double Attenuation = 0.746;
+
+    private static int[] BuildEmphasized()
+    {
+        int[] table = new int[8 * 64];
+        for (int emphasis = 0; emphasis < 8; emphasis++)
+        {
+            for (int colour = 0; colour < 64; colour++)
+            {
+                int packed = Rgb[colour];
+                double red = (packed >> 16) & 0xFF;
+                double green = (packed >> 8) & 0xFF;
+                double blue = packed & 0xFF;
+
+                // Each bit dims the two channels it does not emphasise.
+                if ((emphasis & 1) != 0) { green *= Attenuation; blue *= Attenuation; }
+                if ((emphasis & 2) != 0) { red *= Attenuation; blue *= Attenuation; }
+                if ((emphasis & 4) != 0) { red *= Attenuation; green *= Attenuation; }
+
+                table[(emphasis << 6) | colour] =
+                    ((int)Math.Round(red) << 16) | ((int)Math.Round(green) << 8) | (int)Math.Round(blue);
+            }
+        }
+
+        return table;
+    }
 }
