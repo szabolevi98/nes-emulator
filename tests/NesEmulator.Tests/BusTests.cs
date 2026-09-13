@@ -13,6 +13,145 @@ internal static class BusTests
         OpenBusTests(check);
         ControllerTests(check);
         DmaConflictTests(check);
+        PictureBusTests(check);
+        RenderingAccessTests(check);
+    }
+
+    /// <summary>
+    /// $2004 and $2007 reach memory the beam is already using, so while a line is
+    /// being drawn they behave differently from the same access in blanking.
+    /// </summary>
+    private static void RenderingAccessTests(Action<string, bool> check)
+    {
+        Nes Drawing()
+        {
+            Nes nes = Machine();
+            for (int i = 0; i < 256; i++) nes.Ppu.WriteOam((byte)i, (byte)i);
+            nes.Bus.Write(0x2001, 0x1E);                 // both layers on
+            while (nes.Ppu.Scanline != 10 || nes.Ppu.Cycle != 100) nes.Ppu.Step();
+            return nes;
+        }
+
+        {
+            Nes nes = Drawing();
+            nes.Bus.Write(0x2003, 0x05);
+            nes.Bus.Write(0x2004, 0xAA);
+            nes.Bus.Write(0x2001, 0x00);                 // stop drawing to look at it
+            byte atAddress = nes.Bus.Read(0x2004);
+            nes.Bus.Write(0x2003, 0x05);
+            check("rendering: a $2004 write never reaches sprite memory", nes.Bus.Read(0x2004) == 0x05);
+            check("rendering: a $2004 write bumps only the sprite index", atAddress == 0x08);
+        }
+
+        {
+            // The same write in blanking lands normally and steps by one. Entry 8
+            // is a sprite's Y coordinate, so neither byte is an attribute byte.
+            Nes nes = Machine();
+            for (int i = 0; i < 256; i++) nes.Ppu.WriteOam((byte)i, (byte)i);
+            nes.Bus.Write(0x2003, 0x08);
+            nes.Bus.Write(0x2004, 0xAA);
+            byte next = nes.Bus.Read(0x2004);
+            nes.Bus.Write(0x2003, 0x08);
+            check("blanking: a $2004 write lands and steps by one",
+                nes.Bus.Read(0x2004) == 0xAA && next == 0x09);
+        }
+
+        {
+            // $2007 shares the scroll counters, so an access while drawing clocks
+            // both of them instead of adding the configured step.
+            Nes nes = Drawing();
+            nes.Bus.Write(0x2006, 0x21);
+            nes.Bus.Write(0x2006, 0x08);                 // coarse 8/8, fine Y 2
+            nes.Bus.Read(0x2007);
+            check("rendering: a $2007 read clocks both scroll counters",
+                nes.Ppu.ScrollAddress == 0x3109);
+        }
+
+        {
+            Nes nes = Machine();
+            nes.Bus.Write(0x2006, 0x21);
+            nes.Bus.Write(0x2006, 0x08);
+            nes.Bus.Read(0x2007);
+            check("blanking: a $2007 read steps by the configured amount",
+                nes.Ppu.ScrollAddress == 0x2109);
+        }
+
+        {
+            // The pattern shifters' serial input is tied high, so every shift
+            // brings a one in at the bottom. Dot 100 is not a reload dot, so the
+            // shift is all that happens there.
+            Nes nes = Machine();
+            nes.Bus.Write(0x2001, 0x08);                 // background on
+            while (nes.Ppu.Scanline != 20 || nes.Ppu.Cycle != 100) nes.Ppu.Step();
+            ushort before = nes.Ppu.PatternShiftLow;
+            nes.Ppu.Step();
+            check("rendering: the pattern shifters bring in a one",
+                nes.Ppu.PatternShiftLow == (ushort)((before << 1) | 1));
+        }
+
+        {
+            // The chip's own bus supplies the one line $4015 leaves alone, and a
+            // transfer's cycles never drive it.
+            Nes nes = Machine();
+            for (int i = 0; i < 256; i++) nes.Bus.Write((ushort)(0x0200 + i), 0xFF);
+            nes.Bus.Write(0x0010, 0x00);                 // both buses low
+            nes.Bus.Write(0x4014, 0x02);
+            nes.Bus.RunDma(nes.Cpu, 0x4001);             // drives the external bus high
+            check("transfer: the chip's own bus keeps $4015's unused line",
+                (nes.Bus.Read(0x4015) & 0x20) == 0);
+        }
+    }
+
+    /// <summary>
+    /// The picture unit's own data lines: what a register that drives nothing
+    /// answers with, how long that charge lasts, and what palette memory returns.
+    /// </summary>
+    private static void PictureBusTests(Action<string, bool> check)
+    {
+        // Roughly a second of picture unit clock, well past the decay window.
+        const int Second = 5_369_318;
+
+        {
+            Nes nes = Machine();
+            nes.Bus.Write(0x2000, 0xA5);
+            bool held = nes.Bus.Read(0x2000) == 0xA5;
+            for (int i = 0; i < Second; i++) nes.Ppu.Step();
+            check("picture bus: a write-only register answers with the lines' charge",
+                held && nes.Bus.Read(0x2000) == 0x00);
+        }
+
+        {
+            // Reading $2002 drives only its three status lines, so the five below
+            // them keep whatever charge they have — here, none.
+            Nes nes = Machine();
+            nes.Bus.Write(0x2000, 0xFF);
+            for (int i = 0; i < Second; i++) nes.Ppu.Step();
+            byte status = nes.Bus.Read(0x2002);
+            check("picture bus: $2002 refreshes only its own lines",
+                (status & 0x1F) == 0 && nes.Bus.Read(0x2000) == (status & 0xE0));
+        }
+
+        {
+            // Palette memory drives six lines; the two above them keep their charge.
+            Nes nes = Machine();
+            byte Read(byte entry)
+            {
+                nes.Bus.Write(0x2006, 0x3F);
+                nes.Bus.Write(0x2006, entry);
+                return nes.Bus.Read(0x2007);
+            }
+
+            nes.Bus.Write(0x2006, 0x3F);
+            nes.Bus.Write(0x2006, 0x01);
+            nes.Bus.Write(0x2007, 0x2B);      // the write itself is never masked
+            byte full = Read(0x01);
+            nes.Bus.Write(0x2001, 0x01);      // greyscale
+            byte grey = Read(0x01);
+            check("picture bus: a palette read is six bits wide", full == 0x2B);
+            check("picture bus: greyscale masks the hue out of a palette read", grey == 0x20);
+            nes.Bus.Write(0x2001, 0x00);
+            check("picture bus: greyscale leaves the stored colour alone", Read(0x01) == 0x2B);
+        }
     }
 
     /// <summary>

@@ -53,6 +53,7 @@ public sealed class Ppu2C02
     /// <summary>Reads through $2007 are one fetch behind, except from palette memory.</summary>
     private byte _readBuffer;
     private byte _ioBus;
+    private readonly long[] _ioBusRefresh = new long[8];
     private long _clock;
 
     // Background fetch pipeline.
@@ -97,6 +98,12 @@ public sealed class Ppu2C02
 
     public int Cycle { get; private set; }
 
+    /// <summary>The address counter behind $2006 and the scroll, for offline checks.</summary>
+    internal ushort ScrollAddress => _v;
+
+    /// <summary>The background's low pattern shifter, for offline checks.</summary>
+    internal ushort PatternShiftLow => _patternShiftLow;
+
     /// <summary>Raised when the beam reaches the bottom, so a host can present the frame.</summary>
     public bool FrameComplete { get; set; }
 
@@ -117,6 +124,7 @@ public sealed class Ppu2C02
         _writeLatch = false;
         _readBuffer = 0;
         _ioBus = 0;
+        Array.Clear(_ioBusRefresh);
         Scanline = PreRenderScanline;
         Cycle = 0;
         _oddFrame = false;
@@ -153,6 +161,7 @@ public sealed class Ppu2C02
         writer.Write(_writeLatch);
         writer.Write(_readBuffer);
         writer.Write(_ioBus);
+        foreach (long refresh in _ioBusRefresh) writer.Write(refresh);
         writer.Write(_clock);
         writer.Write(_nameTableByte);
         writer.Write(_attributeByte);
@@ -182,7 +191,7 @@ public sealed class Ppu2C02
         writer.Write(_evalDone); writer.Write(_nextSpriteZero);
     }
 
-    internal bool LoadState(BinaryReader reader, bool legacy = false, bool legacySprites = false)
+    internal bool LoadState(BinaryReader reader, bool legacy = false, bool legacySprites = false, bool legacyBusDecay = false)
     {
         reader.ReadExactly(_vram);
         reader.ReadExactly(_paletteRam);
@@ -197,7 +206,12 @@ public sealed class Ppu2C02
         _writeLatch = reader.ReadBoolean();
         _readBuffer = reader.ReadByte();
         _ioBus = reader.ReadByte();
+        for (int bit = 0; bit < 8; bit++) _ioBusRefresh[bit] = legacyBusDecay ? 0 : reader.ReadInt64();
         _clock = reader.ReadInt64();
+        // Older states carry no decay stamps. Lines still holding charge are taken
+        // as just refreshed, which is the most a state written between instructions
+        // can say; a latch of zero is already indistinguishable from a decayed one.
+        if (legacyBusDecay && _ioBus != 0) Array.Fill(_ioBusRefresh, _clock);
         _nameTableByte = reader.ReadByte();
         _attributeByte = reader.ReadByte();
         _patternLow = reader.ReadByte();
@@ -257,6 +271,35 @@ public sealed class Ppu2C02
 
     // ------------------------------------------------------ processor facing
 
+    /// <summary>
+    /// The picture unit has no pull-ups on its data lines: a value written or read
+    /// is held only as charge on the wires, and each bit leaks away on its own.
+    /// Hardware keeps them for roughly 600 ms, so a register that answers with the
+    /// bus reads back zero a while after the last access that refreshed it.
+    /// </summary>
+    private const long IoBusDecay = 3_221_591; // ~600 ms of picture unit clock
+
+    /// <summary>Reads the latch, dropping every bit that has leaked away.</summary>
+    private byte IoBus()
+    {
+        for (int bit = 0; bit < 8; bit++)
+        {
+            if (_clock - _ioBusRefresh[bit] > IoBusDecay) _ioBus &= (byte)~(1 << bit);
+        }
+
+        return _ioBus;
+    }
+
+    /// <summary>Drives <paramref name="mask"/>'s lines and refreshes their charge.</summary>
+    private void RefreshIoBus(byte value, byte mask = 0xFF)
+    {
+        _ioBus = (byte)((IoBus() & ~mask) | (value & mask));
+        for (int bit = 0; bit < 8; bit++)
+        {
+            if ((mask & (1 << bit)) != 0) _ioBusRefresh[bit] = _clock;
+        }
+    }
+
     /// <summary>The eight registers at $2000, as the processor sees them.</summary>
     public byte ReadRegister(ushort address)
     {
@@ -268,44 +311,55 @@ public sealed class Ppu2C02
                 // suppress the vblank set on dot 1, as well as its NMI output.
                 if (Scanline == 241 && Cycle == 1) _suppressVblank = true;
                 // The unused low bits return whatever was last on the data bus.
-                byte value = (byte)((_status & 0xE0) | (_ioBus & 0x1F));
+                // Only the three status lines are driven; the rest keep their charge.
+                byte value = (byte)((_status & 0xE0) | (IoBus() & 0x1F));
                 _status &= 0x7F;      // reading clears the vertical blank flag
                 _writeLatch = false;  // and resets the two-write sequence
-                _ioBus = value;
+                RefreshIoBus(value, 0xE0);
                 return value;
             }
 
             case 4:
-                return _ioBus = RenderingEnabled && Scanline is >= PreRenderScanline and < ScreenHeight
+            {
+                byte value = RenderingEnabled && Scanline is >= PreRenderScanline and < ScreenHeight
                     ? _oamData : _oam[_oamAddress];
+                RefreshIoBus(value);
+                return value;
+            }
 
             case 7:
             {
                 byte value = _readBuffer;
                 _readBuffer = PpuRead(_v);
 
-                // Palette memory answers immediately; everything else is a fetch behind.
+                // Palette memory answers immediately; everything else is a fetch
+                // behind. Only its six colour lines are driven, and the greyscale
+                // bit masks the hue away on the way out, not on the way in.
+                byte mask = 0xFF;
                 if ((_v & 0x3FFF) >= 0x3F00)
                 {
-                    value = (byte)((_readBuffer & 0x3F) | (_ioBus & 0xC0));
+                    byte colour = (byte)(_readBuffer & ((_mask & 0x01) != 0 ? 0x30 : 0x3F));
+                    value = (byte)(colour | (IoBus() & 0xC0));
                     _readBuffer = PpuRead((ushort)(_v - 0x1000));
+                    mask = 0x3F;
                 }
 
-                _v = (ushort)(_v + AddressIncrement());
-                _mapper.OnPpuAddress((ushort)(_v & 0x3FFF), _clock);
-                _ioBus = value;
+                StepAddress();
+                RefreshIoBus(value, mask);
                 return value;
             }
 
             default:
-                // The write-only registers return the last value on the bus.
-                return _ioBus;
+                // The write-only registers drive nothing: the lines answer with
+                // whatever charge they are still holding.
+                return IoBus();
         }
     }
 
     public void WriteRegister(ushort address, byte value)
     {
-        _ioBus = value;
+        // Every register write drives all eight lines, whatever the register does.
+        RefreshIoBus(value);
 
         switch (address & 7)
         {
@@ -326,6 +380,15 @@ public sealed class Ppu2C02
                 break;
 
             case 4:
+                if (RenderingEnabled && Scanline is >= PreRenderScanline and < ScreenHeight)
+                {
+                    // Sprite evaluation owns sprite memory while the beam is on a
+                    // line: the write never lands, and only the sprite index part
+                    // of the address moves on.
+                    _oamAddress = (byte)((_oamAddress + 4) & 0xFC);
+                    break;
+                }
+
                 WriteOam(_oamAddress, value);
                 _oamAddress++;
                 break;
@@ -364,8 +427,7 @@ public sealed class Ppu2C02
 
             case 7:
                 PpuWrite(_v, value);
-                _v = (ushort)(_v + AddressIncrement());
-                _mapper.OnPpuAddress((ushort)(_v & 0x3FFF), _clock);
+                StepAddress();
                 break;
         }
     }
@@ -379,6 +441,26 @@ public sealed class Ppu2C02
         _oam[offset] = (offset & 3) == 2 ? (byte)(value & 0xE3) : value;
 
     private int AddressIncrement() => (_ctrl & 0x04) != 0 ? 32 : 1;
+
+    /// <summary>
+    /// Moves the address on after a $2007 access. While the beam is drawing, the
+    /// same counters are being used for scrolling, so the access clocks them both
+    /// instead of adding a plain step.
+    /// </summary>
+    private void StepAddress()
+    {
+        if (RenderingEnabled && Scanline is >= PreRenderScanline and < ScreenHeight)
+        {
+            IncrementCoarseX();
+            IncrementY();
+        }
+        else
+        {
+            _v = (ushort)(_v + AddressIncrement());
+        }
+
+        _mapper.OnPpuAddress((ushort)(_v & 0x3FFF), _clock);
+    }
 
     // ------------------------------------------------------- the beam itself
 
@@ -537,8 +619,12 @@ public sealed class Ppu2C02
 
     private void ShiftBackground()
     {
-        _patternShiftLow <<= 1;
-        _patternShiftHigh <<= 1;
+        // The pattern shifters have their serial input tied high, so a one enters
+        // at the bottom on every shift. A reload overwrites the low byte before
+        // those ones can reach the output, which is why they only become visible
+        // when rendering is switched off long enough to skip the reloads.
+        _patternShiftLow = (ushort)((_patternShiftLow << 1) | 1);
+        _patternShiftHigh = (ushort)((_patternShiftHigh << 1) | 1);
         _attributeShiftLow <<= 1;
         _attributeShiftHigh <<= 1;
     }

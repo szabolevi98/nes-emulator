@@ -119,7 +119,7 @@ The five Power On State entries print information rather than judging the consol
 | CPU Behavior 2 | 1 | Implied Dummy Reads | PASS | $01 | — |
 | CPU Behavior 2 | 2 | Branch Dummy Reads | PASS | $01 | — |
 | CPU Behavior 2 | 3 | JSR Edge Cases | PASS | $01 | — |
-| CPU Behavior 2 | 4 | Internal Data Bus | FAIL (2) | $0A | 2 |
+| CPU Behavior 2 | 4 | Internal Data Bus | PASS | $01 | — |
 | Power On State | 0 | PPU Reset Flag | INFO | $00 | — |
 | Power On State | 1 | CPU RAM | INFO | $01 | — |
 | Power On State | 2 | CPU Registers | INFO | $01 | — |
@@ -127,9 +127,9 @@ The five Power On State entries print information rather than judging the consol
 | Power On State | 4 | Palette RAM | INFO | $01 | — |
 | PPU Behavior | 0 | CHR ROM is not writable | PASS | $01 | — |
 | PPU Behavior | 1 | PPU Register Mirroring | PASS | $01 | — |
-| PPU Behavior | 2 | PPU Register Open Bus | FAIL (5) | $16 | 5 |
+| PPU Behavior | 2 | PPU Register Open Bus | PASS | $01 | — |
 | PPU Behavior | 3 | PPU Read Buffer | PASS | $41 | variant 16 |
-| PPU Behavior | 4 | Palette RAM Quirks | FAIL (6) | $1A | 6 |
+| PPU Behavior | 4 | Palette RAM Quirks | PASS | $01 | — |
 | PPU VBlank Timing | 0 | VBlank beginning | PASS | $01 | — |
 | PPU VBlank Timing | 1 | VBlank end | PASS | $01 | — |
 | PPU VBlank Timing | 2 | NMI Control | PASS | $01 | — |
@@ -146,10 +146,10 @@ The five Power On State entries print information rather than judging the consol
 | Sprite Evaluation | 6 | Misaligned OAM behavior | FAIL (1) | $06 | 1 |
 | Sprite Evaluation | 7 | OAM Corruption | FAIL (2) | $0A | 2 |
 | PPU Misc. | 0 | t Register Quirks | PASS | $01 | — |
-| PPU Misc. | 1 | Address $2004 behavior | FAIL (6) | $1A | 6 |
+| PPU Misc. | 1 | Address $2004 behavior | PASS | $41 | variant 16 |
 | PPU Misc. | 2 | INC $4014 | PASS | $01 | — |
 | PPU Misc. | 3 | Rendering Flag Behavior | PASS | $01 | — |
-| PPU Misc. | 4 | $2007 read w/ rendering | FAIL (2) | $0A | 2 |
+| PPU Misc. | 4 | $2007 read w/ rendering | PASS | $01 | — |
 | PPU Misc. | 5 | $2004 Stress Test | FAIL (2) | $0A | 2 |
 | PPU Misc. | 6 | $2007 Stress Test | FAIL (2) | $0A | 2 |
 | Advanced Background Evaluation | 0 | Attributes As Tiles | PASS | $01 | — |
@@ -162,7 +162,7 @@ The five Power On State entries print information rather than judging the consol
 | Advanced Sprite Evaluation | 2 | Frozen OAM2 Increment | FAIL (2) | $0A | 2 |
 | Advanced Sprite Evaluation | 3 | Misaligned OAM2 Address | FAIL (3) | $0E | 3 |
 
-118/144 judged tests passed. 5 informational entries are reported but not counted.
+123/144 judged tests passed. 5 informational entries are reported but not counted.
 
 ## Outstanding failures
 
@@ -173,15 +173,10 @@ The five Power On State entries print information rather than judging the consol
 - Unofficial Instructions: SH* / $9E   SHX absolute,Y: FAIL (7)
 - CPU Interrupts / Interrupt flag latency: FAIL (14)
 - APU Tests / Frame Counter IRQ: FAIL (7)
-- CPU Behavior 2 / Internal Data Bus: FAIL (2)
-- PPU Behavior / PPU Register Open Bus: FAIL (5)
-- PPU Behavior / Palette RAM Quirks: FAIL (6)
 - Sprite Evaluation / $2002 flag timing: FAIL (1)
 - Sprite Evaluation / Arbitrary Sprite zero: FAIL (2)
 - Sprite Evaluation / Misaligned OAM behavior: FAIL (1)
 - Sprite Evaluation / OAM Corruption: FAIL (2)
-- PPU Misc. / Address $2004 behavior: FAIL (6)
-- PPU Misc. / $2007 read w/ rendering: FAIL (2)
 - PPU Misc. / $2004 Stress Test: FAIL (2)
 - PPU Misc. / $2007 Stress Test: FAIL (2)
 - Advanced Background Evaluation / Stale BG Shift Registers: FAIL (4)

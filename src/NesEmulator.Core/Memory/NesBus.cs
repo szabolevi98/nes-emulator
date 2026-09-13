@@ -42,6 +42,16 @@ public sealed class NesBus(
     private byte _openBus;
 
     /// <summary>
+    /// The 2A03's own data bus, which the processor's cycles drive but a transfer's
+    /// do not. It is what supplies the one line $4015 leaves alone, so a sample
+    /// fetch colliding with that register cannot reach it.
+    /// </summary>
+    private byte _internalBus;
+
+    /// <summary>Set while a transfer, rather than the processor, owns the cycle.</summary>
+    private bool _transferCycle;
+
+    /// <summary>
     /// Page latched by OAM DMA, or -1 when no transfer is pending. An RMW write
     /// can replace this page before the processor reaches the next read cycle.
     /// </summary>
@@ -97,17 +107,23 @@ public sealed class NesBus(
                 else if (dmcStage == 2 && get)
                 {
                     // The DMC owns this GET. OAM must realign before its next read.
+                    _transferCycle = true;
                     cpu.DmaRead(_apu.Dmc.DmaAddress, _apu.Dmc.CompleteDma);
+                    _transferCycle = false;
                     dmcStage = 0;
                 }
                 else if (oam && get)
                 {
+                    _transferCycle = true;
                     oamByte = cpu.DmaRead((ushort)((page << 8) | offset));
+                    _transferCycle = false;
                     oamByteReady = true;
                 }
                 else if (oam && oamByteReady)
                 {
+                    _transferCycle = true;
                     cpu.DmaWrite(0x2004, oamByte);
+                    _transferCycle = false;
                     oamByteReady = false;
                     oam = ++offset < 256;
                 }
@@ -164,10 +180,15 @@ public sealed class NesBus(
             // Its unused bit is the one line the chip leaves alone, so that bit
             // comes from whatever else is on the bus. Everything driving the bus
             // keeps driving it; only the reader takes the chip's answer.
-            byte status = (byte)((_apu.ReadStatus() & 0xDF) | (value & 0x20));
+            // Its unused line is never driven here, so it reads back from the bus
+            // the reader is latching from: the chip's own for the processor, which
+            // a transfer cycle never drives, and the external one for a transfer.
+            byte floating = _transferCycle ? value : _internalBus;
+            byte status = (byte)((_apu.ReadStatus() & 0xDF) | (floating & 0x20));
             _openBus = value;
             _portAddress = 0;
             _portValue = 0;
+            if (!_transferCycle) _internalBus = status;
             return status;
         }
         else if (port)
@@ -180,6 +201,7 @@ public sealed class NesBus(
         }
 
         _openBus = value;
+        if (!_transferCycle) _internalBus = value;
         // Only a port keeps presenting its value; anything else releases /OE.
         _portAddress = port ? register : (ushort)0;
         _portValue = port ? value : (byte)0;
@@ -192,6 +214,7 @@ public sealed class NesBus(
         _portAddress = 0;
         _portValue = 0;
         _openBus = value;
+        if (!_transferCycle) _internalBus = value;
 
         if (address < 0x2000)
         {
@@ -243,9 +266,10 @@ public sealed class NesBus(
         writer.Write(_dmaPage);
         writer.Write(_portAddress);
         writer.Write(_portValue);
+        writer.Write(_internalBus);
     }
 
-    internal void LoadState(BinaryReader reader, bool legacyPort)
+    internal void LoadState(BinaryReader reader, bool legacyPort, bool legacyInternalBus)
     {
         reader.ReadExactly(_ram);
         _openBus = reader.ReadByte();
@@ -254,5 +278,6 @@ public sealed class NesBus(
         // be in progress, so starting with a deasserted /OE reproduces them.
         _portAddress = legacyPort ? (ushort)0 : reader.ReadUInt16();
         _portValue = legacyPort ? (byte)0 : reader.ReadByte();
+        _internalBus = legacyInternalBus ? _openBus : reader.ReadByte();
     }
 }
