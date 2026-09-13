@@ -56,6 +56,18 @@ Two details carry more of the console's character than their size suggests. The 
 
 Playback goes out through the Windows wave API, and the number of buffers the sound card has finished with is what paces the emulator. Timing the frames off a clock instead would drift against the card and break the audio up. The signal is band limited before it is decimated to the output rate; [audio implementation and validation](audio-quality.md) covers that path and how it is checked.
 
+## One data line, and the writes that do not count
+
+The MMC1 has a single data line, so a game cannot hand it a bank number: it
+writes five times, one bit at a time, and the chip clocks them into a shift
+register. That makes the board unusually sensitive to how a write is produced.
+
+A read-modify-write instruction puts the unchanged value back before the new
+one, so `INC $8000` performs two writes on consecutive cycles. The chip ignores
+any write landing on the cycle after another one, taking a run of them as the
+first alone — without that filter the second write clocks a stray bit in and
+the game ends up on a bank it never asked for.
+
 ## Winding back
 
 A save state is everything that can change while a game runs — work RAM, the picture unit's memory and registers, the sound unit's counters, the cartridge's own RAM and bank registers, and the finished picture so that loading mid-frame does not show half of the old one. The cartridge ROM is not in it, which is what keeps a state to about seventy kilobytes.

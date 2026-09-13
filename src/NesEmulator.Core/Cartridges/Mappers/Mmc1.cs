@@ -22,6 +22,16 @@ public sealed class Mmc1 : IMapper
     private byte _chrBank1;
     private byte _prgBank;
 
+    /// <summary>
+    /// The serial port ignores a write that lands on the cycle after another one.
+    /// A read-modify-write instruction puts its unchanged value back before the
+    /// new one, so <c>INC $8000</c> writes twice in a row; without this filter the
+    /// second write clocks a stray bit into the shift register and the game ends
+    /// up on the wrong bank.
+    /// </summary>
+    private bool _wroteThisCycle;
+    private bool _wrotePreviousCycle;
+
     public Mmc1(Cartridge cartridge)
     {
         _cartridge = cartridge;
@@ -64,6 +74,14 @@ public sealed class Mmc1 : IMapper
         if (address < 0x8000)
         {
             _prgRam[(address - 0x6000) % _prgRam.Length] = value;
+            return;
+        }
+
+        // A run of writes on consecutive cycles counts as the first one alone.
+        bool ignored = _wrotePreviousCycle;
+        _wroteThisCycle = true;
+        if (ignored)
+        {
             return;
         }
 
@@ -141,8 +159,16 @@ public sealed class Mmc1 : IMapper
         }
     }
 
+    public void OnM2FallingEdge()
+    {
+        _wrotePreviousCycle = _wroteThisCycle;
+        _wroteThisCycle = false;
+    }
+
     public void SaveState(BinaryWriter writer)
     {
+        writer.Write(_wroteThisCycle);
+        writer.Write(_wrotePreviousCycle);
         writer.Write(_prgRam);
         writer.Write(_shiftRegister);
         writer.Write(_control);
@@ -151,8 +177,12 @@ public sealed class Mmc1 : IMapper
         writer.Write(_prgBank);
     }
 
-    public void LoadState(BinaryReader reader)
+    public void LoadState(BinaryReader reader) => LoadState(reader, false);
+
+    internal void LoadState(BinaryReader reader, bool legacyWriteFilter)
     {
+        _wroteThisCycle = !legacyWriteFilter && reader.ReadBoolean();
+        _wrotePreviousCycle = !legacyWriteFilter && reader.ReadBoolean();
         reader.ReadExactly(_prgRam);
         _shiftRegister = reader.ReadByte();
         _control = reader.ReadByte();

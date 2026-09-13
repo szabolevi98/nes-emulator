@@ -23,7 +23,7 @@ How the interesting parts work, and which hardware quirks had to be reproduced r
 
 ## Accuracy
 
-Two things are measured here. One is a suite of 730 offline checks. The other is the public test ROMs, which probe cycle-exact edges rather than just checking whether games run. They provide a reproducible measure of timing accuracy for specific hardware behavior. The full vblank/NMI, CPU interrupt, APU and MMC3 suites now pass with the chip revisions specified below.
+Two things are measured here. One is a suite of 736 offline checks. The other is the public test ROMs, which probe cycle-exact edges rather than just checking whether games run. They provide a reproducible measure of timing accuracy for specific hardware behavior. The full vblank/NMI, CPU interrupt, APU and MMC3 suites now pass with the chip revisions specified below.
 
 | Measure | Passed | What it covers |
 |---|---:|---|
@@ -52,7 +52,7 @@ The table above is the bar the field uses, and it is met. [AccuracyCoin](https:/
 ## Tests
 
 ```
-dotnet run --project tests/NesEmulator.Tests      # 730 offline checks
+dotnet run --project tests/NesEmulator.Tests      # 736 offline checks
 dotnet run --project tests/NesEmulator.UiTests    # 95 input and menu checks
 ```
 
@@ -65,7 +65,7 @@ PASS  render: the leftmost squares are clipped away
 PASS  mmc3: the interrupt arrives on the counted line
 PASS  state: replaying from a state is deterministic
 ...
-730/730 passed
+736/736 passed
 ```
 
 They cover the opcode table, every addressing mode, the signed overflow cases, branch and interrupt timing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes, the save state round trip and the rewind ring — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out. Nothing is downloaded.

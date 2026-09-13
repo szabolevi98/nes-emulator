@@ -806,6 +806,36 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
         mapper.Mirroring == Mirroring.Vertical, $"got {mapper.Mirroring}");
 }
 
+{
+    // The serial port ignores a write landing on the cycle after another one, so
+    // a read-modify-write instruction clocks one bit rather than two.
+    byte[] image = BuildRom(4, 1, 0x10); // mapper 1
+    for (int bank = 0; bank < 4; bank++) image[16 + (bank * 16384)] = (byte)(0xB0 + bank);
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    void Cycle() => mapper.OnM2FallingEdge();
+    void Write(byte value) { mapper.CpuWrite(0xE000, value); Cycle(); }
+
+    // Bank 1 is 1,0,0,0,0 lowest bit first. The first bit arrives twice, as it
+    // would from a read-modify-write, and an idle cycle then ends the run.
+    Write(1);
+    Write(1);
+    Cycle();
+    Write(0);
+    Cycle();
+    Write(0);
+    Cycle();
+    Write(0);
+    Cycle();
+    Write(0);
+
+    // Counting both halves of the doubled write would have assembled 1,1,0,0,0
+    // instead and selected bank 3.
+    Check("mmc1: a doubled write clocks one bit, not two",
+        mapper.CpuRead(0x8000) == 0xB1, $"got {mapper.CpuRead(0x8000):X2}");
+
+}
+
 // ---------------------------------------------------------- picture unit
 
 Ppu2C02 NewPpu(Mirroring mirroring = Mirroring.Horizontal)
