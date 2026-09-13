@@ -1884,6 +1884,7 @@ byte[] BuildBusyRom()
 
 RegressionTests.Run((name, pass) => Check(name, pass));
 DmaTests.Run((name, pass) => Check(name, pass));
+Mmc3RevisionTests.Run((name, pass) => Check(name, pass));
 
 Console.WriteLine();
 Console.WriteLine($"{total - failures}/{total} passed");

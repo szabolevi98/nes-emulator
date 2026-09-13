@@ -21,10 +21,10 @@ namespace NesEmulator.Core;
 /// </summary>
 public sealed class Nes
 {
-    public Nes(Cartridge cartridge, int sampleRate = 44100)
+    public Nes(Cartridge cartridge, int sampleRate = 44100, Mmc3IrqRevision mmc3Revision = Mmc3IrqRevision.Standard)
     {
         Cartridge = cartridge;
-        Mapper = IMapper.Create(cartridge);
+        Mapper = IMapper.Create(cartridge, mmc3Revision);
         Ppu = new Ppu2C02(Mapper);
         Apu = new Apu2A03(sampleRate);
         Bus = new NesBus(Mapper, Ppu, Apu, Port1, Port2);
@@ -57,8 +57,8 @@ public sealed class Nes
 
     public Controller Port2 { get; } = new();
 
-    public static Nes FromFile(string path, int sampleRate = 44100) =>
-        new(Cartridges.Cartridge.FromFile(path), sampleRate);
+    public static Nes FromFile(string path, int sampleRate = 44100, Mmc3IrqRevision mmc3Revision = Mmc3IrqRevision.Standard) =>
+        new(Cartridges.Cartridge.FromFile(path), sampleRate, mmc3Revision);
 
     public void Reset()
     {
@@ -72,7 +72,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E05; // "NES" and a format version
+    private const uint StateMagic = 0x53454E06; // "NES" and a format version
+    private const uint DmcStateMagic = 0x53454E05;
     private const uint ApuStateMagic = 0x53454E04;
     private const uint NmiStateMagic = 0x53454E03;
     private const uint LegacyStateMagic = 0x53454E02;
@@ -88,6 +89,7 @@ public sealed class Nes
         writer.Write(StateMagic);
         writer.Write(Cartridge.MapperNumber);
         writer.Write(Cartridge.Identity.Span);
+        writer.Write((byte)StateIrqRevision);
 
         using MemoryStream payload = new();
         WriteStatePayload(new BinaryWriter(payload));
@@ -121,10 +123,10 @@ public sealed class Nes
         uint magic = reader.ReadUInt32();
         bool legacy = magic == LegacyStateMagic;
         bool legacyApu = magic < ApuStateMagic;
-        bool legacyDmc = magic != StateMagic;
-        if (magic != StateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
+        bool legacyDmc = magic < DmcStateMagic;
+        if (magic != StateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. A v2 through v5 state is required.");
+            throw new InvalidDataException("Unsupported save state format. A v2 through v6 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -135,6 +137,13 @@ public sealed class Nes
         byte[] identity = reader.ReadBytes(32);
         if (!identity.AsSpan().SequenceEqual(Cartridge.Identity.Span))
             throw new InvalidDataException("This save state belongs to a different ROM image.");
+
+        // v2-v5 were written with the standard MMC3 behavior. Check configuration
+        // before mutating anything, just as for the cartridge identity.
+        Mmc3IrqRevision revision = magic == StateMagic
+            ? (Mmc3IrqRevision)reader.ReadByte() : Mmc3IrqRevision.Standard;
+        if (revision != StateIrqRevision)
+            throw new InvalidDataException("This save state uses a different MMC3 IRQ revision. Select that revision before loading it.");
 
         // Read and verify the complete payload before touching live console state.
         using MemoryStream current = new();
@@ -153,6 +162,9 @@ public sealed class Nes
 
         ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc);
     }
+
+    private Mmc3IrqRevision StateIrqRevision => Mapper is Mmc3 mmc3
+        ? mmc3.IrqRevision : Mmc3IrqRevision.Standard;
 
     private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc)
     {

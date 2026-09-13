@@ -36,13 +36,13 @@ public interface IMapper
     /// <summary>Whether the board is holding the maskable interrupt line down.</summary>
     bool IrqPending => false;
 
-    static IMapper Create(Cartridge cartridge) => cartridge.MapperNumber switch
+    static IMapper Create(Cartridge cartridge, Mmc3IrqRevision mmc3Revision = Mmc3IrqRevision.Standard) => cartridge.MapperNumber switch
     {
         0 => new Nrom(cartridge),
         1 => new Mmc1(cartridge),
         2 => new UxRom(cartridge),
         3 => new CnRom(cartridge),
-        4 => new Mmc3(cartridge),
+        4 => new Mmc3(cartridge, mmc3Revision),
         _ => throw new NotSupportedException(
             $"Mapper {cartridge.MapperNumber} is not implemented yet."),
     };

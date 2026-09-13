@@ -8,9 +8,9 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 
 This additional suite measures DMC/OAM arbitration, including transfer length and copied sprite data. It is reported separately from the original 55-ROM baseline.
 
-| Test ROM | Result | ROM output | SHA-256 |
-|---|---|---|---|
-| sprdma_and_dmc_dma/sprdma_and_dmc_dma.nes | PASS | Passed | db3199bc1b0bdc07a316b3ab999d8fd8bb361456d2154e364c132cb06a26a10f |
-| sprdma_and_dmc_dma/sprdma_and_dmc_dma_512.nes | PASS | Passed | 3789f5134b0561b4344e3f4ce08b4d2a416f67435e083917a80d87fdb9d3583c |
+| Test ROM | IRQ profile | Result | ROM output | SHA-256 |
+|---|---|---|---|---|
+| sprdma_and_dmc_dma/sprdma_and_dmc_dma.nes | — | PASS | Passed | db3199bc1b0bdc07a316b3ab999d8fd8bb361456d2154e364c132cb06a26a10f |
+| sprdma_and_dmc_dma/sprdma_and_dmc_dma_512.nes | — | PASS | Passed | 3789f5134b0561b4344e3f4ce08b4d2a416f67435e083917a80d87fdb9d3583c |
 
 2/2 ROMs passed. Timeout: 3,600 emulated frames per ROM.

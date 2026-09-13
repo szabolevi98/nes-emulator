@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using NesEmulator.Core;
+using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Cpu;
 using NesEmulator.Core.Memory;
 
@@ -50,17 +51,21 @@ internal static class AccuracyRunner
             "The fetch script pins [nes-test-roms](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b). Each row records the SHA-256 of the ROM actually tested.", "",
             "PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` protocol signature present. Failures and timeouts remain failures; no screenshot is treated as a pass. Reset requests wait six frames before resetting the console.", "",
             dma ? "This additional suite measures DMC/OAM arbitration, including transfer length and copied sprite data. It is reported separately from the original 55-ROM baseline."
-                : "`6-MMC3_alt` targets the alternate MMC3A IRQ behavior; this emulator currently models the other revision. Its failure is retained rather than counted as a pass.", "",
-            "| Test ROM | Result | ROM output | SHA-256 |", "|---|---|---|---|"];
+                : "The MMC3 tests require incompatible chip revisions: `6-MMC3_alt` explicitly selects the alternate MMC3A IRQ profile; the other MMC3 tests use the standard profile. The profile column records the configuration chosen before execution. ROM bytes are unchanged; the core does not detect test names.", "",
+            "| Test ROM | IRQ profile | Result | ROM output | SHA-256 |", "|---|---|---|---|---|"];
         int failures = 0;
         foreach (string path in paths)
         {
             string name = Path.GetRelativePath(args[1], path).Replace('\\', '/');
+            Mmc3IrqRevision revision = name == "mmc3_test_2/rom_singles/6-MMC3_alt.nes"
+                ? Mmc3IrqRevision.Alternate : Mmc3IrqRevision.Standard;
+            string profile = name.StartsWith("mmc3_test_2/", StringComparison.Ordinal)
+                ? revision == Mmc3IrqRevision.Alternate ? "MMC3A (alternate)" : "MMC3 standard" : "—";
             string result;
             string message = "";
             try
             {
-                Nes nes = Nes.FromFile(path);
+                Nes nes = Nes.FromFile(path, mmc3Revision: revision);
                 result = "TIMEOUT";
                 int resetAt = -1;
                 // A finite emulated-time budget, independent of the host's speed.
@@ -103,9 +108,9 @@ internal static class AccuracyRunner
                 message = exception.Message;
             }
             if (result != "PASS") failures++;
-            Console.WriteLine($"{result,-10} {name}  {message}");
+            Console.WriteLine($"{result,-10} {name} [{profile}]  {message}");
             string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
-            rows.Add($"| {name} | {result} | {message.Replace("|", "\\|")} | {hash} |");
+            rows.Add($"| {name} | {profile} | {result} | {message.Replace("|", "\\|")} | {hash} |");
         }
         rows.Add($"\n{paths.Count - failures}/{paths.Count} ROMs passed. Timeout: 3,600 emulated frames per ROM.");
         if (args.Length > 2) File.WriteAllLines(args[2], rows);

@@ -1,5 +1,12 @@
 namespace NesEmulator.Core.Cartridges.Mappers;
 
+/// <summary>IRQ behavior differs even between chips bearing the same MMC3B marking.</summary>
+public enum Mmc3IrqRevision : byte
+{
+    Standard,
+    Alternate,
+}
+
 /// <summary>
 /// Mapper 4, the MMC3, the most common board of the console's later years:
 /// Super Mario Bros 3, Mega Man 3 onwards, Kirby, Double Dragon.
@@ -36,9 +43,11 @@ public sealed class Mmc3 : IMapper
     private bool _a12High;
     private long _a12LowSince;
 
-    public Mmc3(Cartridge cartridge)
+    public Mmc3(Cartridge cartridge, Mmc3IrqRevision irqRevision = Mmc3IrqRevision.Standard)
     {
+        if (!Enum.IsDefined(irqRevision)) throw new ArgumentOutOfRangeException(nameof(irqRevision));
         _cartridge = cartridge;
+        IrqRevision = irqRevision;
         _prgSlotCount = Math.Max(1, cartridge.PrgRom.Length / PrgSlotSize);
         _mirroring = cartridge.Mirroring;
     }
@@ -48,6 +57,8 @@ public sealed class Mmc3 : IMapper
         : _mirroring;
 
     public bool IrqPending => _irqPending;
+
+    public Mmc3IrqRevision IrqRevision { get; }
 
     public byte CpuRead(ushort address)
     {
@@ -131,6 +142,9 @@ public sealed class Mmc3 : IMapper
 
     public void OnScanline()
     {
+        // MMC3A/non-Sharp MMC3B do not assert on a natural zero-to-zero reload.
+        // An explicit $C001 reload still permits an IRQ, even from zero.
+        bool canAssert = IrqRevision == Mmc3IrqRevision.Standard || _irqCounter != 0 || _irqReload;
         if (_irqCounter == 0 || _irqReload)
         {
             _irqCounter = _irqLatch;
@@ -141,7 +155,7 @@ public sealed class Mmc3 : IMapper
             _irqCounter--;
         }
 
-        if (_irqCounter == 0 && _irqEnabled)
+        if (canAssert && _irqCounter == 0 && _irqEnabled)
         {
             _irqPending = true;
         }

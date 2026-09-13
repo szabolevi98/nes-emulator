@@ -64,14 +64,29 @@ The offline checks cover load alignment, consecutive CPU writes, OAM byte order,
 
 References: [DMC reader and output behavior](https://www.slack.net/~ant/nes-emu/dmc/), [DMA cycles and collisions](https://www.nesdev.org/wiki/DMA), and [hardware OAM/DMC test results](https://forums.nesdev.org/viewtopic.php?t=6100).
 
+## Selectable MMC3 IRQ revisions
+
+The sixth milestone supports alternate MMC3A/non-Sharp MMC3B IRQ behavior alongside the existing standard profile. The public suite reaches **54/55**, including **6/6 MMC3 ROMs**, with the revision explicitly recorded for each test. `5-MMC3` and `6-MMC3_alt` require incompatible hardware behavior: only the latter selects the alternate profile. This is test configuration in the runner, not ROM-name detection in the core or a change to the ROM bytes.
+
+Both profiles assert when the counter decrements to zero, or an explicit `$C001` request reloads zero. Only the standard profile also asserts on a natural zero-to-zero reload. Reload writes do not assert immediately, counting continues while IRQs are disabled, and a pending IRQ remains latched until acknowledged. The existing A12 filter is unchanged.
+
+The core accepts `mmc3Revision: Mmc3IrqRevision.Alternate` when constructing a console or calling `Nes.FromFile`. The desktop exposes the same selection under **Emulation → MMC3 IRQ revision (restarts ROM)** for mapper 4 cartridges. It recreates the console and rewind buffer, preserves pause, and shows the selected profile in the status bar. Opening a ROM defaults to standard behavior; automatic chip-revision detection is not implemented.
+
+Offline checks cover both IRQ truth tables through qualified and rejected A12 edges, latching, counting while disabled, deterministic save replay, and refusal of mismatched state revisions before mutation. Desktop tests exercise both menu choices, restart and pause behavior. A real v5 MMC3/DMC fixture checks migration against bytes from the previous serializer.
+
+A separate cross-profile run also passes MMC3 tests 1–4 with the alternate profile. As expected, `5-MMC3` returns failure 2 under alternate hardware and `6-MMC3_alt` returns failure 2 under standard hardware. These negative controls are not added to the 55-ROM total.
+
+References: [MMC3 IRQ revisions](https://www.nesdev.org/wiki/MMC3#IRQ_Specifics) and the pinned [alternate-revision test source](https://github.com/christopherpow/nes-test-roms/blob/95d8f621ae55cee0d09b91519a8989ae0e64753b/mmc3_test_2/source/6-MMC3_alt.s).
+
 ## Validation and save compatibility
 
-- 415 offline checks, including CPU/PPU/APU timing, DMA arbitration and real v2/v3/v4 state migration fixtures.
-- The complete baseline ROM report retains both failures and their messages; DMA results are reported separately.
+- 451 offline checks, including CPU/PPU/APU timing, DMA arbitration, MMC3 revisions and real v2/v3/v4/v5 state migration fixtures.
+- The complete baseline ROM report retains the remaining `$AB` failure and records selected IRQ profiles; DMA results are reported separately.
+- 87 desktop input and menu checks.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
-New saves use format v5, adding the DMC buffer, pending DMA delay and GET/PUT phase to the v4 APU reset delay and v3 CPU/PPU timing latches. Existing v2/v3/v4 saves remain loadable. Older DMC states retain their output shifter and unread sample address, start with an empty prefetch buffer, and schedule a fetch if the reader is active. v2/v3 states have no pending APU reset. For v2, migration also seeds the CPU's sampled NMI level and transfers any pending PPU NMI event.
+New saves use format v6, adding an IRQ-revision byte to the header. A mismatched profile is rejected before changing live state. Existing v2–v5 saves remain loadable with the standard profile; their payload layouts are unchanged by v6. v5 introduced the DMC buffer, pending DMA delay and GET/PUT phase, after the v4 APU reset delay and v3 CPU/PPU timing latches. Pre-v5 DMC states retain their output shifter and unread sample address, start with an empty prefetch buffer, and schedule a fetch if the reader is active. v2/v3 states have no pending APU reset. For v2, migration also seeds the CPU's sampled NMI level and transfers any pending PPU NMI event. The application version remains 1.0.0.
 
 ```powershell
 dotnet run -c Release --project tests/NesEmulator.Tests
@@ -83,7 +98,7 @@ dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cp
 ## Next targets
 
 1. Remaining DMA quirks: stop/abort windows, hybrid `$4000–$401F` register selection during DMA, and adjacent PPUDATA-read behavior. These are not established by the current passing suites.
-2. An explicit MMC3A revision option and exact M2-phase filtering of A12.
+2. Exact M2-phase filtering of MMC3 A12.
 3. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
 
 Each milestone should retain the previous passing checks and report its remaining mismatches. Sprite evaluation and DMA interactions need coverage beyond the present 55-ROM set.

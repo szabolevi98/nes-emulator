@@ -1,6 +1,7 @@
 using System.Reflection;
 using NesEmulator;
 using NesEmulator.Core;
+using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Input;
 
 internal static class Program
@@ -91,12 +92,55 @@ internal static class Program
         Check("closing menu restores game input", Send(screen, Keys.Enter, true) && nes.Port1.Buttons == NesButton.Start);
         Send(screen, Keys.Enter, false);
         Check("F1 remains available to Save State", !Send(screen, Keys.F1, true));
+        CheckMapperMenu(form, rom);
         form.Dispose();
         using Form survivor = new();
         Check("disposing emulator removes its filter", !Send(survivor, Keys.Enter, true));
 
         Console.WriteLine($"{_total - _failures}/{_total} UI input checks passed.");
         return _failures == 0 ? 0 : 1;
+    }
+
+    private static void CheckMapperMenu(MainForm form, byte[] rom)
+    {
+        object Field(string name) => typeof(MainForm).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(form)!;
+        ToolStripMenuItem menu = (ToolStripMenuItem)Field("_mmc3Item");
+        ToolStripMenuItem standard = (ToolStripMenuItem)Field("_mmc3StandardItem");
+        ToolStripMenuItem alternate = (ToolStripMenuItem)Field("_mmc3AlternateItem");
+        string path = Path.Combine(Path.GetTempPath(), $"nes-mmc3-ui-{Guid.NewGuid():N}.nes");
+        try
+        {
+            File.WriteAllBytes(path, rom);
+            Invoke(form, "LoadRom", path);
+            Invoke(form, "Stop");
+            Check("MMC3 menu is disabled for a different mapper", !menu.Enabled);
+            byte[] mmc3Rom = (byte[])rom.Clone();
+            mmc3Rom[6] = 0x40;
+            File.WriteAllBytes(path, mmc3Rom);
+            Invoke(form, "LoadRom", path);
+            Invoke(form, "Stop");
+            Check("MMC3 ROM opens with standard revision selected", menu.Enabled && standard.Checked && !alternate.Checked
+                && ((Mmc3)((Nes)Field("_nes")).Mapper).IrqRevision == Mmc3IrqRevision.Standard);
+            Nes old = (Nes)Field("_nes");
+            object rewind = Field("_rewind");
+            alternate.PerformClick();
+            Nes changed = (Nes)Field("_nes");
+            Check("MMC3 alternate selection recreates the console and rewind history", !ReferenceEquals(old, changed)
+                && !ReferenceEquals(rewind, Field("_rewind")) && ((Mmc3)changed.Mapper).IrqRevision == Mmc3IrqRevision.Alternate);
+            Check("MMC3 selection preserves pause and updates checks", !(bool)Field("_running") && alternate.Checked && !standard.Checked);
+            alternate.PerformClick();
+            Check("selecting the active MMC3 revision does not restart", ReferenceEquals(changed, Field("_nes")));
+            Invoke(form, "Start");
+            standard.PerformClick();
+            Check("MMC3 standard selection preserves running state", (bool)Field("_running") && standard.Checked && !alternate.Checked
+                && ((Mmc3)((Nes)Field("_nes")).Mapper).IrqRevision == Mmc3IrqRevision.Standard);
+            Invoke(form, "Stop");
+            alternate.PerformClick();
+            Invoke(form, "LoadRom", path);
+            Invoke(form, "Stop");
+            Check("opening a ROM again restores its default MMC3 profile", standard.Checked && !alternate.Checked);
+        }
+        finally { File.Delete(path); }
     }
 
     private static bool Send(Control target, Keys key, bool down)

@@ -24,3 +24,12 @@ migration while the newly added APU reset delay defaults to zero.
 the same held-NMI procedure, then writing `$4010=$0F`, `$4012=0`, `$4013=1`
 and `$4015=$10` without executing another CPU cycle. It checks migration of an
 active DMC reader before its first fetch, including the original sample address.
+
+`v5-mmc3-dmc.state.gz` was written by the core from commit `f468b9b` using
+`Mmc3RevisionTests.Image()`: 32 KB PRG, 8 KB CHR, mapper 4, and `JMP $E000`
+with the reset vector pointing there. After 300 instructions (907 CPU cycles),
+creation writes `$6000=$A5`, sets the IRQ latch to 2, requests reload, enables
+IRQ, and drives A12 low/high at dots 1/20 and 21/40. The counter is now 1.
+It then writes `$4010=$0F`, `$4012=0`, `$4013=1`, `$4015=$10` without another
+CPU cycle and saves. This checks the unchanged v5 payload, pending DMC fetch,
+mapper counter, and the standard IRQ profile implied by older headers.

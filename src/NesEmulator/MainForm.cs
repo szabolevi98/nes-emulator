@@ -3,6 +3,7 @@ using NesEmulator.Audio;
 using NesEmulator.Controls;
 using NesEmulator.Core;
 using NesEmulator.Core.Apu;
+using NesEmulator.Core.Cartridges.Mappers;
 using NesEmulator.Core.Cpu;
 using NesEmulator.Core.Input;
 
@@ -57,6 +58,9 @@ public sealed class MainForm : Form, IMessageFilter
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _soundItem;
+    private readonly ToolStripMenuItem _mmc3Item;
+    private readonly ToolStripMenuItem _mmc3StandardItem;
+    private readonly ToolStripMenuItem _mmc3AlternateItem;
     private readonly float[] _audioBuffer = new float[4096];
     private WaveOutPlayer? _audio;
 
@@ -211,6 +215,12 @@ public sealed class MainForm : Form, IMessageFilter
         emulation.DropDownItems.Add(new ToolStripSeparator());
         emulation.DropDownItems.Add(_soundItem);
         emulation.DropDownItems.Add(BuildChannelMenu());
+        _mmc3StandardItem = new("Standard (MMC3B/C)", null, (_, _) => ChangeMmc3Revision(Mmc3IrqRevision.Standard));
+        _mmc3AlternateItem = new("Alternate (MMC3A)", null, (_, _) => ChangeMmc3Revision(Mmc3IrqRevision.Alternate));
+        _mmc3Item = new("MMC3 IRQ revision (restarts ROM)") { Enabled = false };
+        _mmc3Item.DropDownItems.AddRange([_mmc3StandardItem, _mmc3AlternateItem]);
+        emulation.DropDownItems.Add(new ToolStripSeparator());
+        emulation.DropDownItems.Add(_mmc3Item);
 
         ToolStripMenuItem view = new("&View");
         ToolStripMenuItem debuggerItem = new("&Debugger", null, (sender, _) =>
@@ -322,16 +332,23 @@ public sealed class MainForm : Form, IMessageFilter
         }
     }
 
-    private void LoadRom(string path)
+    private void LoadRom(string path) => LoadRomWithRevision(path, Mmc3IrqRevision.Standard);
+
+    private void LoadRomWithRevision(string path, Mmc3IrqRevision mmc3Revision)
     {
         try
         {
-            _nes = Nes.FromFile(path);
+            _nes = Nes.FromFile(path, mmc3Revision: mmc3Revision);
             _rewind = new RewindBuffer(_nes);
             _romPath = path;
             _trace.Clear();
             _summary.ForeColor = Muted;
             _summary.Text = $"{Path.GetFileName(path)} — {_nes.Cartridge}";
+            _mmc3Item.Enabled = _nes.Mapper is Mmc3;
+            _mmc3StandardItem.Checked = _mmc3Item.Enabled && mmc3Revision == Mmc3IrqRevision.Standard;
+            _mmc3AlternateItem.Checked = _mmc3Item.Enabled && mmc3Revision == Mmc3IrqRevision.Alternate;
+            if (_mmc3Item.Enabled)
+                _summary.Text += mmc3Revision == Mmc3IrqRevision.Alternate ? ", MMC3A IRQ" : ", standard MMC3 IRQ";
             Text = $"{Path.GetFileName(path)} — NES Emulator";
             _pauseItem.Enabled = true;
             Start();
@@ -342,6 +359,7 @@ public sealed class MainForm : Form, IMessageFilter
             _nes = null;
             _rewind = null;
             _romPath = null;
+            _mmc3Item.Enabled = _mmc3StandardItem.Checked = _mmc3AlternateItem.Checked = false;
             Stop();
             _pauseItem.Enabled = false;
             _summary.ForeColor = Warning;
@@ -350,6 +368,15 @@ public sealed class MainForm : Form, IMessageFilter
             _trace.Clear();
             Text = "NES Emulator";
         }
+    }
+
+    private void ChangeMmc3Revision(Mmc3IrqRevision revision)
+    {
+        if (_nes?.Mapper is not Mmc3 mapper || mapper.IrqRevision == revision || _romPath is null) return;
+        bool resume = _running;
+        _rewinding = false;
+        LoadRomWithRevision(_romPath, revision);
+        if (!resume) Stop();
     }
 
     private void Start()
