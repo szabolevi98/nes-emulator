@@ -40,6 +40,15 @@ public sealed class Mmc3 : IMapper
     private bool _irqReload;
     private bool _irqEnabled;
     private bool _irqPending;
+
+    /// <summary>
+    /// $A001 guards the save RAM: one bit connects the chip at all, another makes
+    /// it read-only. Both start permissive, because a cartridge without save RAM
+    /// never writes this register and a game that has it expects to find its save
+    /// where it left it.
+    /// </summary>
+    private bool _prgRamEnabled = true;
+    private bool _prgRamWritable = true;
     private bool _a12High;
     private long _a12LowSince;
     private byte _a12LowM2Edges;
@@ -76,13 +85,19 @@ public sealed class Mmc3 : IMapper
         return 0;
     }
 
-    public bool DrivesCpuRead(ushort address) => address >= 0x6000;
+    public bool DrivesCpuRead(ushort address) =>
+        address >= 0x8000 || (address >= 0x6000 && _prgRamEnabled);
 
     public void CpuWrite(ushort address, byte value)
     {
         if (address >= 0x6000 && address < 0x8000)
         {
-            _prgRam[address - 0x6000] = value;
+            // A disabled or write-protected chip simply does not take the byte.
+            if (_prgRamEnabled && _prgRamWritable)
+            {
+                _prgRam[address - 0x6000] = value;
+            }
+
             return;
         }
 
@@ -114,8 +129,12 @@ public sealed class Mmc3 : IMapper
                 {
                     _mirroring = (value & 1) != 0 ? Mirroring.Horizontal : Mirroring.Vertical;
                 }
+                else
+                {
+                    _prgRamEnabled = (value & 0x80) != 0;
+                    _prgRamWritable = (value & 0x40) == 0;
+                }
 
-                // The odd address guards save RAM, which this does not model.
                 break;
 
             case 0xC000:
@@ -247,14 +266,16 @@ public sealed class Mmc3 : IMapper
         writer.Write(_irqReload);
         writer.Write(_irqEnabled);
         writer.Write(_irqPending);
+        writer.Write(_prgRamEnabled);
+        writer.Write(_prgRamWritable);
         writer.Write(_a12High);
         writer.Write(_a12LowSince);
         writer.Write(_a12LowM2Edges);
     }
 
-    public void LoadState(BinaryReader reader) => LoadState(reader, false, 0);
+    public void LoadState(BinaryReader reader) => LoadState(reader, false, 0, false);
 
-    internal void LoadState(BinaryReader reader, bool legacyFilter, long ppuClock)
+    internal void LoadState(BinaryReader reader, bool legacyFilter, long ppuClock, bool legacyRamGuard)
     {
         reader.ReadExactly(_prgRam);
         reader.ReadExactly(_banks);
@@ -265,6 +286,10 @@ public sealed class Mmc3 : IMapper
         _irqReload = reader.ReadBoolean();
         _irqEnabled = reader.ReadBoolean();
         _irqPending = reader.ReadBoolean();
+        // A state written before the guard was modelled came from a run where
+        // save RAM was always reachable, which is how it starts.
+        _prgRamEnabled = legacyRamGuard || reader.ReadBoolean();
+        _prgRamWritable = legacyRamGuard || reader.ReadBoolean();
         _a12High = reader.ReadBoolean();
         _a12LowSince = reader.ReadInt64();
         // Older states only contain the last falling-A12 timestamp. At public

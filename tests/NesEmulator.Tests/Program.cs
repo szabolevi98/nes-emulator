@@ -1346,6 +1346,38 @@ foreach ((string fixture, int expectedCount) in new[]
 }
 
 {
+    // $A001 guards the save RAM: one bit connects the chip, another makes it
+    // read-only. A cartridge that never writes the register keeps both open.
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(BuildRom(2, 1, 0x40)));
+
+    mapper.CpuWrite(0x6000, 0x5E);
+    Check("mmc3: save RAM is reachable before $A001 is ever written",
+        mapper.DrivesCpuRead(0x6000) && mapper.CpuRead(0x6000) == 0x5E,
+        $"got {mapper.CpuRead(0x6000):X2}");
+
+    mapper.CpuWrite(0xA001, 0xC0);   // enabled, but write protected
+    mapper.CpuWrite(0x6000, 0x11);
+    Check("mmc3: a write-protected chip keeps the byte it had",
+        mapper.CpuRead(0x6000) == 0x5E, $"got {mapper.CpuRead(0x6000):X2}");
+
+    mapper.CpuWrite(0xA001, 0x80);   // enabled and writable again
+    mapper.CpuWrite(0x6000, 0x22);
+    Check("mmc3: clearing the guard lets writes through",
+        mapper.CpuRead(0x6000) == 0x22, $"got {mapper.CpuRead(0x6000):X2}");
+
+    mapper.CpuWrite(0xA001, 0x00);   // chip disconnected
+    Check("mmc3: a disconnected chip drives nothing, so the bus floats",
+        !mapper.DrivesCpuRead(0x6000));
+    mapper.CpuWrite(0x6000, 0x33);
+    mapper.CpuWrite(0xA001, 0x80);
+    Check("mmc3: nothing written while disconnected reached the chip",
+        mapper.CpuRead(0x6000) == 0x22, $"got {mapper.CpuRead(0x6000):X2}");
+
+    Check("mmc3: the guard never blocks the program window",
+        mapper.DrivesCpuRead(0x8000) && mapper.DrivesCpuRead(0xFFFF));
+}
+
+{
     // The line counter: load three, and the interrupt arrives on the fourth line,
     // because the first one is spent reloading.
     IMapper mapper = IMapper.Create(Cartridge.FromBytes(BuildRom(2, 1, 0x40)));
