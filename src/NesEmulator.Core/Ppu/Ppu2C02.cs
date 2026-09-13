@@ -73,6 +73,12 @@ public sealed class Ppu2C02
     private bool _spriteZeroOnLine;
     private bool _spriteZeroRendering;
 
+    internal const int SpriteEvaluationStateSize = 41;
+    private readonly byte[] _secondaryOam = new byte[32];
+    private byte _evalN, _evalM, _secondaryIndex, _nextSpriteCount, _oamData;
+    private byte _copyRemaining, _overflowRemaining;
+    private bool _evalDone, _nextSpriteZero;
+
     private bool _oddFrame;
     private bool _suppressVblank;
     private bool _renderingAtPreviousDot;
@@ -80,6 +86,7 @@ public sealed class Ppu2C02
     public Ppu2C02(IMapper mapper)
     {
         _mapper = mapper;
+        Array.Fill(_secondaryOam, (byte)0xFF);
         Scanline = PreRenderScanline;
     }
 
@@ -116,6 +123,7 @@ public sealed class Ppu2C02
         _suppressVblank = false;
         _renderingAtPreviousDot = false;
         _lineSpriteCount = 0;
+        BeginSpriteEvaluation();
         Array.Clear(FrameBuffer);
     }
 
@@ -167,9 +175,14 @@ public sealed class Ppu2C02
         writer.Write(Cycle);
         writer.Write(FrameCount);
         writer.Write(FrameBuffer);
+        writer.Write(_secondaryOam);
+        writer.Write(_evalN); writer.Write(_evalM); writer.Write(_secondaryIndex);
+        writer.Write(_nextSpriteCount); writer.Write(_oamData);
+        writer.Write(_copyRemaining); writer.Write(_overflowRemaining);
+        writer.Write(_evalDone); writer.Write(_nextSpriteZero);
     }
 
-    internal bool LoadState(BinaryReader reader, bool legacy = false)
+    internal bool LoadState(BinaryReader reader, bool legacy = false, bool legacySprites = false)
     {
         reader.ReadExactly(_vram);
         reader.ReadExactly(_paletteRam);
@@ -210,6 +223,35 @@ public sealed class Ppu2C02
         // The picture is part of the state so that loading mid-frame does not show
         // half of the old one and half of the new.
         reader.ReadExactly(FrameBuffer);
+        if (legacySprites)
+        {
+            // Batched evaluation had no in-flight state. Rebuild the next-line
+            // search from the saved primary OAM, without touching live shifters
+            // or the saved status flags. Historical mid-line OAM writes cannot
+            // be recovered from these older formats.
+            BeginSpriteEvaluation();
+            Array.Fill(_secondaryOam, (byte)0xFF);
+            if (Scanline is >= 0 and < ScreenHeight && Cycle <= 257 && RenderingEnabled)
+            {
+                byte status = _status;
+                for (int dot = 1; dot < Cycle; dot++) EvaluateSpriteDot(dot);
+                _status = status;
+            }
+            else
+            {
+                _lineSprites.CopyTo(_secondaryOam, 0);
+                _nextSpriteCount = (byte)_lineSpriteCount;
+                _nextSpriteZero = _spriteZeroOnLine;
+            }
+        }
+        else
+        {
+            reader.ReadExactly(_secondaryOam);
+            _evalN = reader.ReadByte(); _evalM = reader.ReadByte(); _secondaryIndex = reader.ReadByte();
+            _nextSpriteCount = reader.ReadByte(); _oamData = reader.ReadByte();
+            _copyRemaining = reader.ReadByte(); _overflowRemaining = reader.ReadByte();
+            _evalDone = reader.ReadBoolean(); _nextSpriteZero = reader.ReadBoolean();
+        }
         return legacy && savedNmi;
     }
 
@@ -234,7 +276,8 @@ public sealed class Ppu2C02
             }
 
             case 4:
-                return _ioBus = _oam[_oamAddress];
+                return _ioBus = RenderingEnabled && Scanline is >= PreRenderScanline and < ScreenHeight
+                    ? _oamData : _oam[_oamAddress];
 
             case 7:
             {
@@ -489,11 +532,6 @@ public sealed class Ppu2C02
 
     private void ShiftBackground()
     {
-        if (!ShowBackground)
-        {
-            return;
-        }
-
         _patternShiftLow <<= 1;
         _patternShiftHigh <<= 1;
         _attributeShiftLow <<= 1;
@@ -566,21 +604,29 @@ public sealed class Ppu2C02
 
     private void StepSprites()
     {
-        // Evaluation is still batched; the eight fetch slots occupy dots 257-320.
+        // The current line's output units remain independent while secondary
+        // OAM is cleared and populated for the following line.
+        if (Scanline >= 0 && Cycle is >= 1 and <= 256) EvaluateSpriteDot(Cycle);
         if (Cycle == 257)
         {
-            EvaluateSprites();
+            _lineSpriteCount = Scanline < 0 ? 0 : _nextSpriteCount;
+            _spriteZeroOnLine = Scanline >= 0 && _nextSpriteZero;
         }
 
         if (Cycle >= 257 && Cycle <= 320)
         {
             int slot = (Cycle - 257) / 8;
             int phase = (Cycle - 257) % 8;
+            _oamAddress = 0;
+            _oamData = _secondaryOam[slot * 4 + Math.Min(phase, 3)];
+            if (phase < 4) _lineSprites[slot * 4 + phase] = _oamData;
             if (phase is 0 or 2) PpuRead((ushort)(0x2000 | (_v & 0x0FFF)));
             if (phase is 4 or 6) FetchSpritePattern(slot, phase == 4 ? 0 : 8);
         }
 
-        if (Cycle >= 2 && Cycle < 257 && ShowSprites)
+        if (Cycle >= 321 || Cycle == 0) _oamData = _secondaryOam[0];
+
+        if (Cycle >= 2 && Cycle < 257)
         {
             for (int i = 0; i < _lineSpriteCount; i++)
             {
@@ -597,41 +643,95 @@ public sealed class Ppu2C02
         }
     }
 
-    /// <summary>Finds the first eight sprites that touch the next line.</summary>
-    private void EvaluateSprites()
+    private void BeginSpriteEvaluation()
     {
-        Array.Fill(_lineSprites, (byte)0xFF);
-        _lineSpriteCount = 0;
-        _spriteZeroOnLine = false;
+        _evalN = _evalM = _secondaryIndex = _nextSpriteCount = 0;
+        _copyRemaining = _overflowRemaining = 0;
+        _evalDone = _nextSpriteZero = false;
+        _oamData = 0xFF;
+    }
 
-        int height = (_ctrl & 0x20) != 0 ? 16 : 8;
+    private bool SpriteInRange(byte y) => Scanline >= y && Scanline - y < ((_ctrl & 0x20) != 0 ? 16 : 8);
 
-        for (int i = 0; i < 64; i++)
+    private void AdvanceSprite()
+    {
+        _evalN = (byte)((_evalN + 1) & 63);
+        if (_evalN == 0) _evalDone = true;
+    }
+
+    private void AdvanceSpriteByte()
+    {
+        _evalM = (byte)((_evalM + 1) & 3);
+        if (_evalM == 0) AdvanceSprite();
+    }
+
+    private void EvaluateSpriteDot(int dot)
+    {
+        if (dot == 1) BeginSpriteEvaluation();
+        if (dot <= 64)
         {
-            int top = _oam[i * 4];
-            int row = Scanline - top;
-
-            if (row < 0 || row >= height)
-            {
-                continue;
-            }
-
-            if (_lineSpriteCount == 8)
-            {
-                // The hardware sets this flag with a buggy search; games mostly use
-                // it as a hint that the line is crowded.
-                _status |= 0x20;
-                break;
-            }
-
-            if (i == 0)
-            {
-                _spriteZeroOnLine = true;
-            }
-
-            Array.Copy(_oam, i * 4, _lineSprites, _lineSpriteCount * 4, 4);
-            _lineSpriteCount++;
+            _oamData = 0xFF;
+            if ((dot & 1) == 0) _secondaryOam[dot / 2 - 1] = _oamData;
+            return;
         }
+
+        if (dot == 65) { _evalN = (byte)(_oamAddress >> 2); _evalM = (byte)(_oamAddress & 3); }
+        if ((dot & 1) != 0)
+        {
+            _oamData = _oam[_evalN * 4 + _evalM];
+            return;
+        }
+
+        byte candidate = _oamData;
+        if (_evalDone)
+        {
+            _oamData = _secondaryOam[_secondaryIndex & 31];
+            AdvanceSprite();
+            return;
+        }
+
+        if (_overflowRemaining != 0)
+        {
+            AdvanceSpriteByte();
+            if (--_overflowRemaining == 0) { _evalM = 0; _evalDone = true; }
+        }
+        else if (_secondaryIndex == 32)
+        {
+            if (SpriteInRange(candidate))
+            {
+                _status |= 0x20;
+                _overflowRemaining = 3;
+                AdvanceSpriteByte();
+            }
+            else
+            {
+                // With writes disabled, the low and high address counters both
+                // advance, without carry: tile/attribute/X bytes become Y tests.
+                AdvanceSprite();
+                _evalM = (byte)((_evalM + 1) & 3);
+            }
+        }
+        else
+        {
+            _secondaryOam[_secondaryIndex] = candidate;
+            if (_copyRemaining != 0)
+            {
+                _secondaryIndex++;
+                _copyRemaining--;
+                AdvanceSpriteByte();
+            }
+            else if (SpriteInRange(candidate))
+            {
+                _nextSpriteZero |= _evalN == 0;
+                _nextSpriteCount++;
+                _secondaryIndex++;
+                _copyRemaining = 3;
+                AdvanceSpriteByte();
+            }
+            else AdvanceSprite();
+        }
+        if (_evalDone) _evalM = 0;
+        if (_secondaryIndex == 32) _oamData = _secondaryOam[0];
     }
 
     private void FetchSpritePattern(int i, int plane)

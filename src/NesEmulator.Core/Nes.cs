@@ -72,7 +72,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E07; // "NES" and a format version
+    private const uint StateMagic = 0x53454E08; // "NES" and a format version
+    private const uint M2StateMagic = 0x53454E07;
     private const uint IrqStateMagic = 0x53454E06;
     private const uint DmcStateMagic = 0x53454E05;
     private const uint ApuStateMagic = 0x53454E04;
@@ -125,9 +126,9 @@ public sealed class Nes
         bool legacy = magic == LegacyStateMagic;
         bool legacyApu = magic < ApuStateMagic;
         bool legacyDmc = magic < DmcStateMagic;
-        if (magic != StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
+        if (magic != StateMagic && magic != M2StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. A v2 through v7 state is required.");
+            throw new InvalidDataException("Unsupported save state format. A v2 through v8 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -154,26 +155,27 @@ public sealed class Nes
         // latch. The old PPU pending-event byte becomes its suppression latch.
         // v4 also saves the pending APU frame-counter reset delay.
         // v5 adds the DMC buffer, DMA request delay and GET/PUT phase (7 bytes).
-        bool legacyFilter = magic < StateMagic;
+        bool legacyFilter = magic < M2StateMagic;
+        bool legacySprites = magic < StateMagic;
         // v7 adds one filter byte only for MMC3 cartridges.
         if (length != current.Length - (legacy ? 2 : 0) - (legacyApu ? 4 : 0) - (legacyDmc ? 7 : 0)
-            - (legacyFilter && Mapper is Mmc3 ? 1 : 0))
+            - (legacyFilter && Mapper is Mmc3 ? 1 : 0) - (legacySprites ? Ppu2C02.SpriteEvaluationStateSize : 0))
             throw new InvalidDataException("The save state has an incompatible size.");
         byte[] checksum = reader.ReadBytes(32);
         byte[] data = reader.ReadBytes(length);
         if (data.Length != length || !checksum.AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(data)))
             throw new InvalidDataException("The save state is incomplete or damaged.");
 
-        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc, legacyFilter);
+        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc, legacyFilter, legacySprites);
     }
 
     private Mmc3IrqRevision StateIrqRevision => Mapper is Mmc3 mmc3
         ? mmc3.IrqRevision : Mmc3IrqRevision.Standard;
 
-    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc, bool legacyFilter)
+    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc, bool legacyFilter, bool legacySprites)
     {
         Cpu.LoadState(reader, legacy);
-        bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy);
+        bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy, legacySprites);
         Apu.LoadState(reader, legacyApu, legacyDmc);
         Bus.LoadState(reader);
         if (Mapper is Mmc3 mmc3) mmc3.LoadState(reader, legacyFilter, Ppu.Clock);

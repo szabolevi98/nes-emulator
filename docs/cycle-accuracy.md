@@ -90,26 +90,43 @@ The public result remains **54/55 ROMs**, including **6/6 MMC3** and **2/2 addit
 
 References: [MMC3 IRQ specifics](https://www.nesdev.org/wiki/MMC3#IRQ_Specifics) and [hardware discussion of three M2 falls and the odd-frame alignment](https://forums.nesdev.org/viewtopic.php?start=30&t=24229).
 
+## Per-dot sprite evaluation and overflow
+
+The eighth milestone brings the additional overflow suite from **3/5 to 5/5**: `3.Timing` and `4.Obscure` now pass. All **11/11 sprite-zero-hit ROMs** also pass, preserving their earlier results. The separate `--sprite-suite` reports these **16/16** results without changing the baseline denominator.
+
+The PPU now has a 32-byte secondary OAM distinct from the current line's output units. Visible-line dots 1–64 clear one byte on each even dot. During dots 65–256, odd dots read primary OAM and even dots compare/copy the latched byte. Rejected sprites cost two dots; selected sprites take eight. Once eight are selected, the overflow search advances both address components without carry and can mistake a tile, attribute or X byte for a Y coordinate. The flag is set on the comparison dot, including the early dot-130 and late dot-240 cases.
+
+Fetch dots 257–320 transfer Y, tile, attributes and X from secondary OAM into each output slot. OAMDATA reads expose the clear/evaluation/fetch latch. No evaluation runs on pre-render, and no sprites are enabled for the first visible line; pre-render fetches still use the retained secondary data. Output shifters and X counters continue while either rendering layer is enabled, so hiding a layer does not freeze its pipeline.
+
+The old sprite ROMs predate the `$6000` signature protocol. Their included validation/runtime sources use `$00F8=1` for success and eventually enter a `JMP` to itself. The runner requires both conditions; it does not infer success from a screenshot or from an intermediate result byte. Failure codes and ROM hashes remain visible in the separate report.
+
+Offline coverage includes false-positive and false-negative overflow, wrapping the primary address, read/write latch boundaries, secondary clearing, independent current-line pixels, hidden-layer pipeline clocks, and saves across clear, copy, overflow and fetch dots. OAMADDR corruption, rendering-time writes to OAM, fine details of overflow-tail readback and rendering-toggle corruption remain separate targets; the current passing sprite ROMs do not establish those behaviors.
+
+References: [PPU sprite evaluation](https://www.nesdev.org/wiki/PPU_sprite_evaluation), [hardware overflow test sources](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/sprite_overflow_tests/source), and [sprite-zero-hit tests](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/sprite_hit_tests_2005.10.05).
+
 ## Validation and save compatibility
 
-- 587 offline checks, including CPU/PPU/APU timing, DMA arbitration, MMC3 revisions/M2 filtering and real v2–v6 state migration fixtures.
+- 641 offline checks, including CPU/PPU/APU timing, DMA arbitration, MMC3 revisions/M2 filtering, sprite evaluation and real v2–v7 state migration fixtures.
 - The complete baseline ROM report retains the remaining `$AB` failure and records selected IRQ profiles; DMA results are reported separately.
 - 87 desktop input and menu checks.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
-New saves use format v7, adding one filter-progress byte to MMC3 payloads. v6 introduced the IRQ-revision byte in the header. A mismatched profile is rejected before changing live state. Existing v2–v6 saves remain loadable: v2–v5 imply standard MMC3, while v6 preserves its selected profile. For older MMC3 states, filter progress is reconstructed from the saved A12-low timestamp and elapsed PPU clock at the instruction boundary, where M2 has just fallen; both v6 profiles have real migration fixtures. v5 introduced the DMC buffer, pending DMA delay and GET/PUT phase, after the v4 APU reset delay and v3 CPU/PPU timing latches. Pre-v5 DMC states retain their output shifter and unread sample address, start with an empty prefetch buffer, and schedule a fetch if the reader is active. v2/v3 states have no pending APU reset. For v2, migration also seeds the CPU's sampled NMI level and transfers any pending PPU NMI event. The application version remains 1.0.0.
+New saves use format v8, adding 41 bytes for secondary OAM and the evaluation/fetch latches. Existing v2–v7 saves remain loadable. Older formats have no partial sprite search: migration reconstructs it from saved primary OAM during evaluation, or retains the selected sprite data during fetch/blanking, preserving existing output shifters and status flags. Earlier OAM writes within that line cannot be reconstructed; v8 captures the actual partial state. Real v7 snapshots at dots 100 and 270 verify both migration paths.
+
+v7 added one filter-progress byte to MMC3 payloads. v6 introduced the IRQ-revision byte in the header. A mismatched profile is rejected before changing live state; v2–v5 imply standard MMC3, while later formats preserve the selected profile. For pre-v7 MMC3 states, filter progress is reconstructed from the saved A12-low timestamp and elapsed PPU clock at the instruction boundary, where M2 has just fallen; both v6 profiles have real migration fixtures. v5 introduced the DMC buffer, pending DMA delay and GET/PUT phase, after the v4 APU reset delay and v3 CPU/PPU timing latches. Pre-v5 DMC states retain their output shifter and unread sample address, start with an empty prefetch buffer, and schedule a fetch if the reader is active. v2/v3 states have no pending APU reset. For v2, migration also seeds the CPU's sampled NMI level and transfers any pending PPU NMI event. The application version remains 1.0.0.
 
 ```powershell
 dotnet run -c Release --project tests/NesEmulator.Tests
 dotnet run -c Release --project tests/NesEmulator.Tests -- --rom-suite roms/accuracy docs/accuracy-results.md
 dotnet run -c Release --project tests/NesEmulator.Tests -- --dma-suite roms/accuracy docs/dma-results.md
+dotnet run -c Release --project tests/NesEmulator.Tests -- --sprite-suite roms/accuracy docs/sprite-results.md
 dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cpu-vectors
 ```
 
 ## Next targets
 
 1. Remaining DMA quirks: stop/abort windows, hybrid `$4000–$401F` register selection during DMA, and adjacent PPUDATA-read behavior. These are not established by the current passing suites.
-2. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
+2. OAMADDR/write corruption, rendering-time OAM accesses, and PPUMASK transition behavior, with additional public suites.
 
-Each milestone should retain the previous passing checks and report its remaining mismatches. Sprite evaluation and DMA interactions need coverage beyond the present 55-ROM set.
+Each milestone should retain the previous passing checks and report its remaining mismatches. The additional DMA and sprite suites extend coverage beyond the original 55-ROM set; they do not prove every PPU/bus interaction.

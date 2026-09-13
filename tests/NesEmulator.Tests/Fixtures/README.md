@@ -43,3 +43,12 @@ second byte. At the save boundary PC is `$0203`, CPU cycles are 11, the PPU
 clock is 33, and A12 has been low since dot 32. Exactly one M2 falling edge
 has occurred in that interval. These fixtures check filter migration for both
 profiles against the old serializer, including v6's IRQ-profile header.
+
+`v7-sprites-dot-100.state.gz` and `v7-sprites-dot-270.state.gz` were written
+by the core from commit `45c3067` using the synthetic cartridge/setup in
+`SpriteEvaluationTests.Machine()`: NROM with CHR RAM, a `JMP $8000` program,
+a solid tile, and nine sprites at Y=10 and X=0,8,...,64. After setup, only
+the PPU advances to scanline 10, next dot 100 or 270. The first snapshot
+precedes the old batched evaluation; the second contains its selected sprites
+partway through pattern fetching. Both verify that v8 migration preserves
+the next line's eight visible sprites. They contain no commercial ROM data.
