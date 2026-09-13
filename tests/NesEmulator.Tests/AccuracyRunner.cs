@@ -170,7 +170,7 @@ internal static class AccuracyRunner
             rows.Add($"| {name} | {profile} | {result} | {message.Replace("|", "\\|")} | {hash} |");
         }
         rows.Add($"\n{paths.Count - failures}/{paths.Count} ROMs passed with the {AbProfileName} `$AB` profile. Timeout: 3,600 emulated frames per ROM.");
-        if (args.Length > 2) File.WriteAllLines(args[2], rows);
+        if (args.Length > 2 && args[2].Length > 0) File.WriteAllLines(args[2], rows);
         Console.WriteLine(rows[^1]);
         return failures == 0 ? 0 : 1;
     }

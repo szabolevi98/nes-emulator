@@ -102,7 +102,7 @@ The five Power On State entries print information rather than judging the consol
 | APU Registers and DMA tests | 3 | DMA + $2007 Write | PASS | $01 | — |
 | APU Registers and DMA tests | 4 | DMA + $4015 Read | PASS | $01 | — |
 | APU Registers and DMA tests | 5 | DMA + $4016 Read | PASS | $05 | variant 1 |
-| APU Registers and DMA tests | 6 | DMC DMA Bus Conflicts | FAIL (2) | $0A | 2 |
+| APU Registers and DMA tests | 6 | DMC DMA Bus Conflicts | PASS | $01 | — |
 | APU Registers and DMA tests | 7 | DMC DMA + OAM DMA | PASS | $01 | — |
 | APU Registers and DMA tests | 8 | Explicit DMA Abort | PASS | $01 | — |
 | APU Registers and DMA tests | 9 | Implicit DMA Abort | PASS | $05 | variant 1 |
@@ -112,9 +112,9 @@ The five Power On State entries print information rather than judging the consol
 | APU Tests | 3 | Frame Counter 4-step | PASS | $01 | — |
 | APU Tests | 4 | Frame Counter 5-step | PASS | $01 | — |
 | APU Tests | 5 | Delta Modulation Channel | PASS | $01 | — |
-| APU Tests | 6 | APU Register Activation | FAIL (4) | $12 | 4 |
+| APU Tests | 6 | APU Register Activation | PASS | $05 | variant 1 |
 | APU Tests | 7 | Controller Strobing | PASS | $01 | — |
-| APU Tests | 8 | Controller Clocking | FAIL (7) | $1E | 7 |
+| APU Tests | 8 | Controller Clocking | PASS | $05 | variant 1 |
 | CPU Behavior 2 | 0 | Instruction Timing | PASS | $01 | — |
 | CPU Behavior 2 | 1 | Implied Dummy Reads | PASS | $01 | — |
 | CPU Behavior 2 | 2 | Branch Dummy Reads | PASS | $01 | — |
@@ -146,7 +146,7 @@ The five Power On State entries print information rather than judging the consol
 | Sprite Evaluation | 6 | Misaligned OAM behavior | FAIL (1) | $06 | 1 |
 | Sprite Evaluation | 7 | OAM Corruption | FAIL (2) | $0A | 2 |
 | PPU Misc. | 0 | t Register Quirks | PASS | $01 | — |
-| PPU Misc. | 1 | Address $2004 behavior | FAIL (3) | $0E | 3 |
+| PPU Misc. | 1 | Address $2004 behavior | FAIL (6) | $1A | 6 |
 | PPU Misc. | 2 | INC $4014 | PASS | $01 | — |
 | PPU Misc. | 3 | Rendering Flag Behavior | PASS | $01 | — |
 | PPU Misc. | 4 | $2007 read w/ rendering | FAIL (2) | $0A | 2 |
@@ -162,7 +162,7 @@ The five Power On State entries print information rather than judging the consol
 | Advanced Sprite Evaluation | 2 | Frozen OAM2 Increment | FAIL (2) | $0A | 2 |
 | Advanced Sprite Evaluation | 3 | Misaligned OAM2 Address | FAIL (3) | $0E | 3 |
 
-115/144 judged tests passed. 5 informational entries are reported but not counted.
+118/144 judged tests passed. 5 informational entries are reported but not counted.
 
 ## Outstanding failures
 
@@ -172,10 +172,7 @@ The five Power On State entries print information rather than judging the consol
 - Unofficial Instructions: SH* / $9C   SHY absolute,X: FAIL (7)
 - Unofficial Instructions: SH* / $9E   SHX absolute,Y: FAIL (7)
 - CPU Interrupts / Interrupt flag latency: FAIL (14)
-- APU Registers and DMA tests / DMC DMA Bus Conflicts: FAIL (2)
 - APU Tests / Frame Counter IRQ: FAIL (7)
-- APU Tests / APU Register Activation: FAIL (4)
-- APU Tests / Controller Clocking: FAIL (7)
 - CPU Behavior 2 / Internal Data Bus: FAIL (2)
 - PPU Behavior / PPU Register Open Bus: FAIL (5)
 - PPU Behavior / Palette RAM Quirks: FAIL (6)
@@ -183,7 +180,7 @@ The five Power On State entries print information rather than judging the consol
 - Sprite Evaluation / Arbitrary Sprite zero: FAIL (2)
 - Sprite Evaluation / Misaligned OAM behavior: FAIL (1)
 - Sprite Evaluation / OAM Corruption: FAIL (2)
-- PPU Misc. / Address $2004 behavior: FAIL (3)
+- PPU Misc. / Address $2004 behavior: FAIL (6)
 - PPU Misc. / $2007 read w/ rendering: FAIL (2)
 - PPU Misc. / $2004 Stress Test: FAIL (2)
 - PPU Misc. / $2007 Stress Test: FAIL (2)

@@ -12,6 +12,79 @@ internal static class BusTests
     {
         OpenBusTests(check);
         ControllerTests(check);
+        DmaConflictTests(check);
+    }
+
+    /// <summary>
+    /// While a transfer holds the processor, the 2A03 still decodes its own
+    /// registers: the stalled processor address says whether they answer, and the
+    /// address on the pins picks which one, mirrored every $20 bytes.
+    /// </summary>
+    private static void DmaConflictTests(Action<string, bool> check)
+    {
+        // A sprite transfer from an unmapped page, stalled inside $4000-$401F.
+        Nes Transfer(byte page, ushort stalled)
+        {
+            Nes nes = Machine(0xAD, 0x16, 0x40); // LDA $4016
+            nes.Port1.Buttons = NesButton.A;
+            Strobe(nes);
+            nes.Bus.Write(0x4014, page);
+            nes.Bus.RunDma(nes.Cpu, stalled);
+            return nes;
+        }
+
+        byte Sprite(Nes nes, byte offset)
+        {
+            nes.Bus.Write(0x2003, offset);
+            return nes.Bus.Read(0x2004);
+        }
+
+        {
+            Nes nes = Transfer(0x50, 0x4001);
+            check("dma conflict: a mirrored read collects the pad's data lines",
+                (Sprite(nes, 0x16) & 1) == 1 && (Sprite(nes, 0x17) & 1) == 0);
+        }
+
+        {
+            // The same transfer with the processor stalled outside that range
+            // reaches no register at all.
+            Nes nes = Transfer(0x50, 0x0300);
+            check("dma conflict: a stall outside $4000-$401F reaches no register",
+                (Sprite(nes, 0x16) & 1) == 0);
+        }
+
+        {
+            // Work RAM drives the same lines harder than a pad does.
+            Nes nes = Machine(0xAD, 0x16, 0x40);
+            nes.Port1.Buttons = NesButton.A;
+            Strobe(nes);
+            for (int i = 0; i < 256; i++) nes.Bus.Write((ushort)(0x0200 + i), 0xFF);
+            nes.Bus.Write(0x4014, 0x02);
+            nes.Bus.RunDma(nes.Cpu, 0x4001);
+            // Offset $17 is not an attribute byte, so the whole value survives.
+            check("dma conflict: work RAM hides the pad", Sprite(nes, 0x17) == 0xFF);
+        }
+
+        {
+            // The status register answers wherever it is mirrored, and reading it
+            // acknowledges the frame interrupt even when nobody asked for it.
+            Nes nes = Machine(0xAD, 0x16, 0x40);
+            nes.Apu.WriteRegister(0x4017, 0x00);
+            for (int i = 0; i < 30000; i++) nes.Apu.Step();
+            bool raised = nes.Apu.IrqPending;
+            nes.Bus.Write(0x4014, 0x50);
+            nes.Bus.RunDma(nes.Cpu, 0x4001);
+            check("dma conflict: a mirrored status read acknowledges the frame interrupt",
+                raised && !nes.Apu.IrqPending);
+        }
+
+        {
+            // And it leaves the bus alone, so the next unmapped read is unchanged.
+            Nes nes = Machine();
+            nes.Bus.Write(0x0010, 0x20);
+            nes.Bus.RunDma(nes.Cpu, 0x4001);
+            check("dma conflict: the status read does not drive the bus", nes.Bus.Read(0x5000) == 0x20);
+        }
     }
 
     private static void OpenBusTests(Action<string, bool> check)

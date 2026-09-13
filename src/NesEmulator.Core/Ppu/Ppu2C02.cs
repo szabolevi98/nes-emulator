@@ -326,7 +326,7 @@ public sealed class Ppu2C02
                 break;
 
             case 4:
-                _oam[_oamAddress] = value;
+                WriteOam(_oamAddress, value);
                 _oamAddress++;
                 break;
 
@@ -370,8 +370,13 @@ public sealed class Ppu2C02
         }
     }
 
-    /// <summary>Sprite memory, filled in one go by a direct memory transfer from $4014.</summary>
-    public void WriteOam(byte offset, byte value) => _oam[offset] = value;
+    /// <summary>
+    /// Sprite memory, filled one byte at a time or in one go by a transfer from
+    /// $4014. Three bits of each sprite's attribute byte have no storage behind
+    /// them on this chip, so they are dropped on the way in and read back as zero.
+    /// </summary>
+    public void WriteOam(byte offset, byte value) =>
+        _oam[offset] = (offset & 3) == 2 ? (byte)(value & 0xE3) : value;
 
     private int AddressIncrement() => (_ctrl & 0x04) != 0 ? 32 : 1;
 

@@ -19,6 +19,9 @@ internal static class CoinSuiteRunner
     private const int InformationalPage = 3;
     private const int FrameBudget = 3600;
 
+    /// <summary>Where a timed-out test was left, to say which loop it sat in.</summary>
+    private static string _timeoutDetail = "";
+
     private readonly record struct CoinTest(int Page, string PageName, int Index, string Name, ushort Result)
     {
         public bool Informational => Result >> 8 == InformationalPage;
@@ -53,6 +56,7 @@ internal static class CoinSuiteRunner
         List<string> failures = [];
         foreach (CoinTest test in tests)
         {
+            _timeoutDetail = "";
             (string status, byte result) = RunOne(path, test);
             string code = status.StartsWith("FAIL", StringComparison.Ordinal) ? $"{result >> 2}"
                 : result >> 2 != 0 && status == "PASS" ? $"variant {result >> 2}" : "—";
@@ -63,8 +67,8 @@ internal static class CoinSuiteRunner
                 if (status == "PASS") passed++;
                 else { failed++; failures.Add($"{test.PageName} / {test.Name}: {status}"); }
             }
-            Console.WriteLine($"{status,-10} [{test.Page:00}/{test.Index:00}] {test.PageName} / {test.Name}  ${result:X2}");
-            rows.Add($"| {test.PageName} | {test.Index} | {test.Name.Replace("|", "\\|")} | {status} | ${result:X2} | {code} |");
+            Console.WriteLine($"{status,-10} [{test.Page:00}/{test.Index:00}] {test.PageName} / {test.Name}  ${result:X2} {_timeoutDetail}");
+            rows.Add($"| {test.PageName} | {test.Index} | {test.Name.Replace("|", "\\|")} | {status} | ${result:X2} | {(_timeoutDetail.Length > 0 ? _timeoutDetail : code)} |");
         }
 
         rows.Add("");
@@ -124,6 +128,9 @@ internal static class CoinSuiteRunner
             result = nes.Bus.Peek(test.Result);
             if ((result & 3) is 1 or 2) break;
         }
+
+        if ((result & 3) is not (1 or 2))
+            _timeoutDetail = $"PC ${nes.Cpu.PC:X4}, cycle {nes.Cpu.Cycles}";
 
         return ((result & 3) switch
         {

@@ -168,13 +168,27 @@ References: [open bus](https://www.nesdev.org/wiki/Open_bus_behavior), [controll
 
 Still missing: the PPU's own open bus and its decay over time, and the DMC DMA's bus conflicts with the 2A03 registers.
 
+## Transfer bus conflicts with the 2A03 registers
+
+The thirteenth milestone models what the sound chip's own registers do while a transfer holds the processor. AccuracyCoin goes from **115/144 to 118/144**: `DMC DMA Bus Conflicts`, `APU Register Activation` and `Controller Clocking` now pass, with the blargg suites unchanged.
+
+Only five address lines reach the register decoder inside the 2A03, so `$4015`, `$4016` and `$4017` are mirrored every `$20` bytes across the whole address space. What keeps a game from tripping over that is a second condition: the registers answer only while the *processor's* address is inside `$4000-$401F`. A transfer changes the address on the pins but not the one the stalled processor is presenting, and the two conditions then come apart. A sample fetch from `$FF16` reads controller 1 at the same time, and a sprite transfer through a page of open bus collects the status byte at every `$x15` — while the same transfer with the processor stalled anywhere else reads nothing at all.
+
+When two drivers meet on the same lines, which one is visible depends on what they are. The status register drives every line but its unused bit, and wins over work RAM; that bit comes from whatever else is on the bus. A controller's data lines win over a cartridge, so a sample fetch shows the pad's bits under the sample's top three — but lose to work RAM, so a sprite transfer out of RAM records the RAM byte and the pads stay invisible even though they are still being clocked. Both of those are what the ROM's own answer keys record.
+
+Reading a mirrored `$4015` still acknowledges the frame interrupt, which is how the ROM detects the whole effect in the first place, and it still leaves the external bus alone.
+
+One sprite-memory detail came out of the same answer keys: three bits of each sprite's attribute byte have no storage behind them, so they are dropped on the way into OAM and read back as zero.
+
+References: AccuracyCoin's [`DMC DMA Bus Conflicts` and `APU Register Activation` sources](https://github.com/100thCoin/AccuracyCoin/blob/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e/AccuracyCoin.asm), whose comments carry the expected sprite-memory contents byte by byte, and [NESdev on DMA bugs](https://www.nesdev.org/wiki/DMA#Bugs).
+
 ## Validation and save compatibility
 
-- 712 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation, both `$AB` profiles and real v2–v9 state migration fixtures.
+- 717 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation, both `$AB` profiles and real v2–v9 state migration fixtures.
 - The complete baseline ROM report records the selected IRQ profiles and the `$AB` profile it ran under; DMA results are reported separately.
 - The complete AccuracyCoin collection is measured test by test, with every failure and error code listed.
 - 95 desktop input and menu checks.
-- Offline bus checks cover unmapped reads, `$4015`'s internal path, the port's undriven bits, the strobe alignment and contiguous port reads.
+- Offline bus checks cover unmapped reads, `$4015`'s internal path, the port's undriven bits, the strobe alignment, contiguous port reads and the transfer conflicts against open bus, work RAM and a stall outside the register range.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 

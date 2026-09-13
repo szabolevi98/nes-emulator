@@ -56,6 +56,16 @@ public sealed class NesBus(
     private ushort _portAddress;
     private byte _portValue;
 
+    /// <summary>
+    /// The address the processor was presenting when a transfer stalled it, or -1
+    /// when it owns the bus. The 2A03 decodes its own registers from the stalled
+    /// processor address but takes the register index from whatever address is
+    /// actually on the pins, so a sample fetch from $FF16 also reads controller 1
+    /// while an OAM transfer through $40xx reads nothing unless the processor was
+    /// itself addressing $4000-$401F.
+    /// </summary>
+    private int _stalledAddress = -1;
+
     public int RunDma(Cpu6502 cpu) => RunDma(cpu, cpu.PC);
 
     internal void CancelDma() => _dmaPage = -1;
@@ -72,6 +82,7 @@ public sealed class NesBus(
         byte oamByte = 0;
         int offset = 0;
         int dmcStage = 0; // 0: inactive, 1: dummy, 2: waiting for GET
+        _stalledAddress = haltedAddress;
         try
         {
             while (oam || dmcStage != 0 || _apu.Dmc.DmaPending)
@@ -116,59 +127,61 @@ public sealed class NesBus(
             // An aborted halt may return straight to the same controller read,
             // without a DMA fetch to deassert /OE between the two cycles. That is
             // the same contiguous-read rule the bus already tracks.
+            _stalledAddress = -1;
         }
         return (int)(cpu.Cycles - start);
     }
 
     public byte Read(ushort address)
     {
-        bool port = address is 0x4016 or 0x4017;
-        if (port && address == _portAddress)
-        {
-            // Still the same read as far as the port is concerned.
-            return _openBus = _portValue;
-        }
+        // Which internal register answers, if any. Only five address lines reach
+        // the decoder, so it is the address the processor is presenting that says
+        // whether the registers answer at all.
+        int decoded = _stalledAddress < 0 ? address : _stalledAddress;
+        ushort register = decoded is >= 0x4000 and < 0x4020 ? (ushort)(0x4000 | (address & 0x1F)) : (ushort)0;
+        // When a pad and something else drive the same lines, who wins depends on
+        // the driver. Work RAM overpowers a pad; a cartridge does not, which is
+        // why a sample fetch shows the pad's bits and a transfer out of RAM does
+        // not. Both are what the ROM's own answer keys record.
+        bool port = register is 0x4016 or 0x4017 && address >= 0x2000;
+        bool contiguous = port && register == _portAddress;
 
+        // Whatever is wired to this address drives the bus first. Nothing outside
+        // the 2A03 answers $4000-$401F, and a board only drives what it decodes.
+        bool driven = address < 0x4000 || (address >= 0x4020 && _mapper.DrivesCpuRead(address));
         byte value;
+        if (address < 0x2000) value = _ram[address & 0x07FF];
+        else if (address < 0x4000) value = _ppu.ReadRegister(address);
+        // The bus floats and keeps whatever the previous cycle left on it.
+        else value = driven ? _mapper.CpuRead(address) : _openBus;
 
-        if (address < 0x2000)
+        if (register == 0x4015)
         {
-            value = _ram[address & 0x07FF];
+            // Answered inside the chip, which never drives the external bus, so
+            // the bus keeps its value and the read still acknowledges the frame
+            // interrupt. Whoever is reading sees the status unless something out
+            // on the bus is driving these lines and wins.
+            // Its unused bit is the one line the chip leaves alone, so that bit
+            // comes from whatever else is on the bus. Everything driving the bus
+            // keeps driving it; only the reader takes the chip's answer.
+            byte status = (byte)((_apu.ReadStatus() & 0xDF) | (value & 0x20));
+            _openBus = value;
+            _portAddress = 0;
+            _portValue = 0;
+            return status;
         }
-        else if (address < 0x4000)
+        else if (port)
         {
-            value = _ppu.ReadRegister(address);
-        }
-        else if (address == 0x4016)
-        {
-            // Only the low data lines are driven by the port; the rest float.
-            value = (byte)((_openBus & 0xE0) | _port1.Read());
-        }
-        else if (address == 0x4017)
-        {
-            value = (byte)((_openBus & 0xE0) | _port2.Read());
-        }
-        else if (address == 0x4015)
-        {
-            // The 2A03 answers this one from inside the chip, so the external data
-            // bus is never driven: its unused bit reads back whatever was already
-            // on the bus, and the bus keeps that value for the following cycle.
-            return (byte)((_apu.ReadStatus() & 0xDF) | (_openBus & 0x20));
-        }
-        else if (address < 0x4020)
-        {
-            value = _openBus;
-        }
-        else
-        {
-            // Nothing decodes this address on the cartridge: the bus floats and
-            // keeps whatever the previous cycle left on it.
-            value = _mapper.DrivesCpuRead(address) ? _mapper.CpuRead(address) : _openBus;
+            // Only the low data lines are driven by the pad; the rest keep what
+            // the bus already carried, which during a collision is the fetched
+            // sample. A contiguous read leaves the shift register unclocked.
+            Controller pad = register == 0x4016 ? _port1 : _port2;
+            value = (byte)((value & 0xE0) | ((contiguous ? _portValue : pad.Read()) & 0x1F));
         }
 
         _openBus = value;
         // Only a port keeps presenting its value; anything else releases /OE.
-        _portAddress = port ? address : (ushort)0;
+        _portAddress = port ? register : (ushort)0;
         _portValue = port ? value : (byte)0;
         return value;
     }
