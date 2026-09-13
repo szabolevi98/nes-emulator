@@ -15,7 +15,7 @@ All three chips run, and commercial cartridges render and play.
 - **6502 core** — every documented instruction plus the undocumented opcodes, driven by the bus: each cycle performs a real read or write, dummy reads included
 - **Picture unit** — background and sprites, scrolling, palettes, sprite zero hit, sprite overflow, edge clipping, drawn one pixel per cycle as the beam sweeps
 - **Sound unit** — two square waves with sweeps, triangle, noise and sample playback through the console's non-linear mixer, band limited before it reaches the sound card
-- **Cartridges** — iNES parsing and mappers 0, 1, 2, 3 and 4, which between them cover most of the library; the MMC3 follows filtered A12 edges with selectable standard or alternate MMC3A IRQ behavior
+- **Cartridges** — iNES parsing and mappers 0, 1, 2, 3 and 4, which between them cover most of the library; the MMC3 filters A12 using actual CPU M2 edges, with selectable standard or alternate MMC3A IRQ behavior
 - **Save states and rewind** — a full console state, about five kilobytes compressed, and a minute of play to wind back through
 - **Debugger** — a disassembler and execution trace that folds out beside the screen
 
@@ -23,7 +23,7 @@ How the interesting parts work, and which hardware quirks had to be reproduced r
 
 ## Accuracy
 
-Two things are measured here. One is a suite of 451 offline checks. The other is the public test ROMs, which probe cycle-exact edges rather than just checking whether games run. They provide a reproducible measure of timing accuracy for specific hardware behavior. The full vblank/NMI, CPU interrupt, APU and MMC3 suites now pass with the chip revisions specified below.
+Two things are measured here. One is a suite of 587 offline checks. The other is the public test ROMs, which probe cycle-exact edges rather than just checking whether games run. They provide a reproducible measure of timing accuracy for specific hardware behavior. The full vblank/NMI, CPU interrupt, APU and MMC3 suites now pass with the chip revisions specified below.
 
 | Measure | Passed | What it covers |
 |---|---:|---|
@@ -43,7 +43,7 @@ Every result, failure message and ROM checksum is in the [full report](docs/accu
 ## Tests
 
 ```
-dotnet run --project tests/NesEmulator.Tests      # 451 offline checks
+dotnet run --project tests/NesEmulator.Tests      # 587 offline checks
 dotnet run --project tests/NesEmulator.UiTests    # 87 input and menu checks
 ```
 
@@ -56,7 +56,7 @@ PASS  render: the leftmost squares are clipped away
 PASS  mmc3: the interrupt arrives on the counted line
 PASS  state: replaying from a state is deterministic
 ...
-451/451 passed
+587/587 passed
 ```
 
 They cover the opcode table, every addressing mode, the signed overflow cases, branch and interrupt timing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes, the save state round trip and the rewind ring — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out. Nothing is downloaded.

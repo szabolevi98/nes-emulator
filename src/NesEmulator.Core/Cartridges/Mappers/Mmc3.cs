@@ -42,6 +42,7 @@ public sealed class Mmc3 : IMapper
     private bool _irqPending;
     private bool _a12High;
     private long _a12LowSince;
+    private byte _a12LowM2Edges;
 
     public Mmc3(Cartridge cartridge, Mmc3IrqRevision irqRevision = Mmc3IrqRevision.Standard)
     {
@@ -165,8 +166,16 @@ public sealed class Mmc3 : IMapper
     {
         bool high = (address & 0x1000) != 0;
         if (!high && _a12High) _a12LowSince = cycle;
-        if (high && !_a12High && cycle - _a12LowSince >= 8) OnScanline();
+        if (high && !_a12High && _a12LowM2Edges == 3) OnScanline();
+        // A12 asynchronously clears the filter, including pulses entirely
+        // between CPU edges. Repeated low addresses leave its progress intact.
+        if (high) _a12LowM2Edges = 0;
         _a12High = high;
+    }
+
+    public void OnM2FallingEdge()
+    {
+        if (!_a12High && _a12LowM2Edges < 3) _a12LowM2Edges++;
     }
 
     private int PrgOffset(ushort address)
@@ -238,9 +247,12 @@ public sealed class Mmc3 : IMapper
         writer.Write(_irqPending);
         writer.Write(_a12High);
         writer.Write(_a12LowSince);
+        writer.Write(_a12LowM2Edges);
     }
 
-    public void LoadState(BinaryReader reader)
+    public void LoadState(BinaryReader reader) => LoadState(reader, false, 0);
+
+    internal void LoadState(BinaryReader reader, bool legacyFilter, long ppuClock)
     {
         reader.ReadExactly(_prgRam);
         reader.ReadExactly(_banks);
@@ -253,5 +265,11 @@ public sealed class Mmc3 : IMapper
         _irqPending = reader.ReadBoolean();
         _a12High = reader.ReadBoolean();
         _a12LowSince = reader.ReadInt64();
+        // Older states only contain the last falling-A12 timestamp. At public
+        // instruction boundaries M2 has just fallen; earlier falls are 3 dots
+        // apart. Reconstruct the progress for the selected NTSC phase.
+        _a12LowM2Edges = legacyFilter
+            ? _a12High ? (byte)0 : (byte)Math.Clamp((ppuClock - _a12LowSince) / 3 + 1, 0, 3)
+            : reader.ReadByte();
     }
 }

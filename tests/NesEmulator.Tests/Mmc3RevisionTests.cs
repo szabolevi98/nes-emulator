@@ -16,6 +16,7 @@ internal static class Mmc3RevisionTests
             void Edge()
             {
                 mapper.OnPpuAddress(0, ++dot);
+                for (int i = 0; i < 3; i++) mapper.OnM2FallingEdge();
                 mapper.OnPpuAddress(0x1000, dot += 12);
             }
             void Acknowledge()
@@ -57,6 +58,7 @@ internal static class Mmc3RevisionTests
             Acknowledge();
             mapper.CpuWrite(0xC001, 0);
             mapper.OnPpuAddress(0, ++dot);
+            mapper.OnM2FallingEdge(); mapper.OnM2FallingEdge();
             mapper.OnPpuAddress(0x1000, dot += 7);
             check($"MMC3 {revision}: short A12 pulse cannot consume reload", !mapper.IrqPending);
             Edge();
@@ -100,6 +102,7 @@ internal static class Mmc3RevisionTests
             restored.Cpu.PC == 0xE000 && restored.Cpu.Cycles == 907 && restored.Bus.Read(0x6000) == 0xA5
             && restored.Apu.Dmc.Active && !restored.Mapper.IrqPending);
         restored.Mapper.OnPpuAddress(0, 41);
+        for (int i = 0; i < 3; i++) restored.Mapper.OnM2FallingEdge();
         restored.Mapper.OnPpuAddress(0x1000, 53);
         check("state v5: restored nonzero MMC3 counter reaches IRQ on the next edge", restored.Mapper.IrqPending);
         byte[] migrated = Save(restored);

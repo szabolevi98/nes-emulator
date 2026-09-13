@@ -125,10 +125,16 @@ internal static class RegressionTests
             mapper.CpuWrite(0xC000, 1);
             mapper.CpuWrite(0xC001, 0);
             mapper.CpuWrite(0xE001, 0);
-            mapper.OnPpuAddress(0, 0); mapper.OnPpuAddress(0x1000, 10); // reload
-            mapper.OnPpuAddress(0, 11); mapper.OnPpuAddress(0x1000, 15); // too short
+            mapper.OnPpuAddress(0, 0);
+            for (int i = 0; i < 3; i++) mapper.OnM2FallingEdge();
+            mapper.OnPpuAddress(0x1000, 10); // reload
+            mapper.OnPpuAddress(0, 11);
+            mapper.OnM2FallingEdge();
+            mapper.OnPpuAddress(0x1000, 15); // too short
             check("mmc3: filters short A12 low pulses", !mapper.IrqPending);
-            mapper.OnPpuAddress(0, 16); mapper.OnPpuAddress(0x1000, 26);
+            mapper.OnPpuAddress(0, 16);
+            for (int i = 0; i < 3; i++) mapper.OnM2FallingEdge();
+            mapper.OnPpuAddress(0x1000, 26);
             check("mmc3: qualified A12 edge decrements counter", mapper.IrqPending);
         }
         {
@@ -278,6 +284,7 @@ internal static class RegressionTests
 
         foreach (byte control in new byte[] { 0x08, 0x10 })
         foreach (byte mask in new byte[] { 0x08, 0x10, 0x18 })
+        foreach (int phase in new[] { 0, 1, 2 })
         {
             byte[] image = Image(0); image[6] = 0x40;
             Mmc3 mapper = new(Cartridge.FromBytes(image));
@@ -295,6 +302,7 @@ internal static class RegressionTests
                 {
                     (int line, int dot) = (ppu.Scanline, ppu.Cycle);
                     ppu.Step();
+                    if ((ppu.Clock + phase) % 3 == 0) mapper.OnM2FallingEdge();
                     if (!mapper.IrqPending) continue;
                     edges.Add((line, dot));
                     mapper.CpuWrite(0xE000, 0);
@@ -306,14 +314,14 @@ internal static class RegressionTests
                     if (control == 0x08) expected.Add((line, 261));
                     else
                     {
-                        // At construction fewer than eight dots precede the
-                        // first pattern fetch. Only the odd frame's skipped
-                        // aborted fetch adds an edge at the next line's dot 5.
-                        if (line == 0 && frame == 1) expected.Add((line, 5));
+                        // At startup fewer than three M2 falls precede CHR.
+                        // The odd skip leaves eight low dots across the boundary;
+                        // only two of the three alignments contain three falls.
+                        if (line == 0 && frame == 1 && phase != 0) expected.Add((line, 5));
                         expected.Add((line, 325));
                     }
                 }
-                check($"MMC3 ${control:X2}, mask ${mask:X2}, frame {frame}: qualified edges over the entire frame",
+                check($"MMC3 ${control:X2}, mask ${mask:X2}, M2 phase {phase}, frame {frame}: qualified edges over the entire frame",
                     edges.SequenceEqual(expected));
             }
         }

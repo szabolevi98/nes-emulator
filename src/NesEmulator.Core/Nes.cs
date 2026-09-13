@@ -72,7 +72,8 @@ public sealed class Nes
 
     // ----------------------------------------------------------- save states
 
-    private const uint StateMagic = 0x53454E06; // "NES" and a format version
+    private const uint StateMagic = 0x53454E07; // "NES" and a format version
+    private const uint IrqStateMagic = 0x53454E06;
     private const uint DmcStateMagic = 0x53454E05;
     private const uint ApuStateMagic = 0x53454E04;
     private const uint NmiStateMagic = 0x53454E03;
@@ -124,9 +125,9 @@ public sealed class Nes
         bool legacy = magic == LegacyStateMagic;
         bool legacyApu = magic < ApuStateMagic;
         bool legacyDmc = magic < DmcStateMagic;
-        if (magic != StateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
+        if (magic != StateMagic && magic != IrqStateMagic && magic != DmcStateMagic && magic != ApuStateMagic && magic != NmiStateMagic && !legacy)
         {
-            throw new InvalidDataException("Unsupported save state format. A v2 through v6 state is required.");
+            throw new InvalidDataException("Unsupported save state format. A v2 through v7 state is required.");
         }
 
         if (reader.ReadInt32() != Cartridge.MapperNumber)
@@ -140,7 +141,7 @@ public sealed class Nes
 
         // v2-v5 were written with the standard MMC3 behavior. Check configuration
         // before mutating anything, just as for the cartridge identity.
-        Mmc3IrqRevision revision = magic == StateMagic
+        Mmc3IrqRevision revision = magic >= IrqStateMagic
             ? (Mmc3IrqRevision)reader.ReadByte() : Mmc3IrqRevision.Standard;
         if (revision != StateIrqRevision)
             throw new InvalidDataException("This save state uses a different MMC3 IRQ revision. Select that revision before loading it.");
@@ -153,26 +154,30 @@ public sealed class Nes
         // latch. The old PPU pending-event byte becomes its suppression latch.
         // v4 also saves the pending APU frame-counter reset delay.
         // v5 adds the DMC buffer, DMA request delay and GET/PUT phase (7 bytes).
-        if (length != current.Length - (legacy ? 2 : 0) - (legacyApu ? 4 : 0) - (legacyDmc ? 7 : 0))
+        bool legacyFilter = magic < StateMagic;
+        // v7 adds one filter byte only for MMC3 cartridges.
+        if (length != current.Length - (legacy ? 2 : 0) - (legacyApu ? 4 : 0) - (legacyDmc ? 7 : 0)
+            - (legacyFilter && Mapper is Mmc3 ? 1 : 0))
             throw new InvalidDataException("The save state has an incompatible size.");
         byte[] checksum = reader.ReadBytes(32);
         byte[] data = reader.ReadBytes(length);
         if (data.Length != length || !checksum.AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(data)))
             throw new InvalidDataException("The save state is incomplete or damaged.");
 
-        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc);
+        ReadStatePayload(new BinaryReader(new MemoryStream(data)), legacy, legacyApu, legacyDmc, legacyFilter);
     }
 
     private Mmc3IrqRevision StateIrqRevision => Mapper is Mmc3 mmc3
         ? mmc3.IrqRevision : Mmc3IrqRevision.Standard;
 
-    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc)
+    private void ReadStatePayload(BinaryReader reader, bool legacy, bool legacyApu, bool legacyDmc, bool legacyFilter)
     {
         Cpu.LoadState(reader, legacy);
         bool legacyPpuNmiPending = Ppu.LoadState(reader, legacy);
         Apu.LoadState(reader, legacyApu, legacyDmc);
         Bus.LoadState(reader);
-        Mapper.LoadState(reader);
+        if (Mapper is Mmc3 mmc3) mmc3.LoadState(reader, legacyFilter, Ppu.Clock);
+        else Mapper.LoadState(reader);
         Port1.LoadState(reader);
         Port2.LoadState(reader);
 
@@ -203,6 +208,9 @@ public sealed class Nes
     private void CompleteTick()
     {
         Ppu.Step();
+        // Selected NTSC alignment: M2 falls after this cycle's final PPU dot,
+        // before interrupt sampling. This path also runs during DMA and reset.
+        Mapper.OnM2FallingEdge();
         Cpu.SetIrqLine(Apu.IrqPending || Mapper.IrqPending);
     }
 

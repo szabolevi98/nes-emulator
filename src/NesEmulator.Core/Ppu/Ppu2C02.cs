@@ -95,6 +95,9 @@ public sealed class Ppu2C02
 
     public long FrameCount { get; private set; }
 
+    /// <summary>Elapsed dots; unlike the beam position this does not restart on reset.</summary>
+    internal long Clock => _clock;
+
     public void Reset()
     {
         _ctrl = 0;

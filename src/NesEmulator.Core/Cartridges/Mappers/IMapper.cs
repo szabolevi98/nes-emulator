@@ -22,9 +22,8 @@ public interface IMapper
     Mirroring Mirroring { get; }
 
     /// <summary>
-    /// Called once per visible line while the picture unit is drawing. Boards that
-    /// count lines so a game can be interrupted partway down the screen use this;
-    /// the rest ignore it.
+    /// Clocks a board's line counter directly for diagnostics. During console
+    /// execution MMC3 derives qualified clocks from PPU A12 and CPU M2 instead.
     /// </summary>
     void OnScanline()
     {
@@ -32,6 +31,9 @@ public interface IMapper
 
     /// <summary>External PPU address bus, timestamped in PPU dots (including CPU register accesses).</summary>
     void OnPpuAddress(ushort address, long cycle) { }
+
+    /// <summary>Falling edge of CPU M2, including stalled and reset cycles.</summary>
+    void OnM2FallingEdge() { }
 
     /// <summary>Whether the board is holding the maskable interrupt line down.</summary>
     bool IrqPending => false;

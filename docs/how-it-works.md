@@ -47,7 +47,7 @@ A save state is everything that can change while a game runs — work RAM, the p
 
 That is still too much to keep once a frame, so rewind takes a snapshot every tenth frame and deflates it. A console's memory is mostly repeated bytes and long runs of zero, so they come down to around five kilobytes each: three hundred and sixty of them, a minute of play, costs under two megabytes. Holding backspace walks back through them.
 
-State format v6 carries the mapper number, the selected MMC3 IRQ profile, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM or IRQ profile is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. Along with the CPU/PPU/APU timing latches, it stores the DMC prefetch buffer, DMA request delay and GET/PUT phase. Existing v2–v5 saves are migrated when loaded with the standard IRQ profile, including an unconsumed PPU NMI event from v2 and an active DMC reader from older formats; v1 remains unsupported.
+State format v7 carries the mapper number, the selected MMC3 IRQ profile, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM or IRQ profile is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. Along with the CPU/PPU/APU timing latches, it stores the DMC prefetch buffer, DMA request delay, GET/PUT phase and MMC3 M2 filter progress. Existing v2–v6 saves are migrated when loaded with their original IRQ profile (standard for v2–v5), including an unconsumed PPU NMI event from v2 and an active DMC reader from older formats; v1 remains unsupported.
 
 ## Running it from a debugger
 

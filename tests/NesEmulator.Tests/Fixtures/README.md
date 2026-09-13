@@ -33,3 +33,13 @@ IRQ, and drives A12 low/high at dots 1/20 and 21/40. The counter is now 1.
 It then writes `$4010=$0F`, `$4012=0`, `$4013=1`, `$4015=$10` without another
 CPU cycle and saves. This checks the unchanged v5 payload, pending DMC fetch,
 mapper counter, and the standard IRQ profile implied by older headers.
+
+`v6-mmc3-standard-low.state.gz` and `v6-mmc3-alternate-low.state.gz` were
+written by the core from commit `c239b8a`, using the same synthetic cartridge
+and the named IRQ profile. After the seven reset cycles, creation sets PPUADDR
+to `$1000`, writes `$C001=0` and `$E001=0`, and supplies the first PPUADDR byte
+for `$0000`. A real `STA $2006` instruction at `$0200`, with A=0, supplies the
+second byte. At the save boundary PC is `$0203`, CPU cycles are 11, the PPU
+clock is 33, and A12 has been low since dot 32. Exactly one M2 falling edge
+has occurred in that interval. These fixtures check filter migration for both
+profiles against the old serializer, including v6's IRQ-profile header.
