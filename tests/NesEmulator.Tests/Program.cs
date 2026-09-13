@@ -898,6 +898,109 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
 }
 
 {
+    // MMC2: eight kilobytes of program switch at the bottom, the last three
+    // banks are pinned above them, and the tile banks follow the picture unit's
+    // own fetches rather than anything the game writes.
+    byte[] image = BuildRom(4, 4, 0x90); // mapper 9, 64 KB program, 32 KB tiles
+    int chr = 16 + (4 * 16384);
+    for (int bank = 0; bank < 8; bank++)
+    {
+        image[16 + (bank * 8192)] = (byte)(0xE0 + bank);
+        image[chr + (bank * 4096)] = (byte)(0x70 + bank);
+    }
+
+    image[chr + (1 * 4096) + 0x0FE8] = 0x5D;  // the byte the triggering fetch reads
+    image[chr + (2 * 4096) + 0x0FE8] = 0x5E;  // what it would read had the bank moved first
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    Check("mmc2: the three fixed banks are the last three",
+        mapper.CpuRead(0xA000) == 0xE5 && mapper.CpuRead(0xC000) == 0xE6 && mapper.CpuRead(0xE000) == 0xE7,
+        $"got {mapper.CpuRead(0xA000):X2} {mapper.CpuRead(0xC000):X2} {mapper.CpuRead(0xE000):X2}");
+
+    mapper.CpuWrite(0xA000, 0x03);
+    Check("mmc2: the bottom window switches on its own",
+        mapper.CpuRead(0x8000) == 0xE3 && mapper.CpuRead(0xA000) == 0xE5,
+        $"got {mapper.CpuRead(0x8000):X2} {mapper.CpuRead(0xA000):X2}");
+
+    mapper.CpuWrite(0xB000, 0x01); // lower window, tile $FD seen: bank 1
+    mapper.CpuWrite(0xC000, 0x02); // lower window, tile $FE seen: bank 2
+    Check("mmc2: the lower window starts on its $FD bank",
+        mapper.PpuRead(0x0000) == 0x71, $"got {mapper.PpuRead(0x0000):X2}");
+
+    byte triggering = mapper.PpuRead(0x0FE8);
+    Check("mmc2: the fetch that trips the latch is answered from the old bank",
+        triggering == 0x5D, $"got {triggering:X2}");
+    Check("mmc2: everything after it comes from the new one",
+        mapper.PpuRead(0x0000) == 0x72, $"got {mapper.PpuRead(0x0000):X2}");
+
+    mapper.PpuRead(0x0FD9);
+    Check("mmc2: the lower window ignores the rest of the tile",
+        mapper.PpuRead(0x0000) == 0x72, $"got {mapper.PpuRead(0x0000):X2}");
+    mapper.PpuRead(0x0FD8);
+    Check("mmc2: and switches back on the row it does watch",
+        mapper.PpuRead(0x0000) == 0x71, $"got {mapper.PpuRead(0x0000):X2}");
+
+    mapper.CpuWrite(0xD000, 0x04); // upper window, $FD
+    mapper.CpuWrite(0xE000, 0x05); // upper window, $FE
+    Check("mmc2: the two windows latch separately",
+        mapper.PpuRead(0x1000) == 0x74, $"got {mapper.PpuRead(0x1000):X2}");
+    mapper.PpuRead(0x1FEA);
+    Check("mmc2: the upper window takes the whole row",
+        mapper.PpuRead(0x1000) == 0x75 && mapper.PpuRead(0x0000) == 0x71,
+        $"got {mapper.PpuRead(0x1000):X2} {mapper.PpuRead(0x0000):X2}");
+
+    Check("mmc2: mirroring starts as the header says",
+        mapper.Mirroring == Mirroring.Horizontal, $"got {mapper.Mirroring}");
+    mapper.CpuWrite(0xF000, 0x00);
+    Check("mmc2: the last register switches mirroring",
+        mapper.Mirroring == Mirroring.Vertical, $"got {mapper.Mirroring}");
+
+    MemoryStream saved = new();
+    mapper.SaveState(new BinaryWriter(saved));
+    mapper.CpuWrite(0xA000, 0x00);
+    mapper.PpuRead(0x0FE8);
+    mapper.CpuWrite(0xF000, 0x01);
+    saved.Position = 0;
+    mapper.LoadState(new BinaryReader(saved));
+    Check("mmc2: a state carries the banks, the latches and the mirroring",
+        mapper.CpuRead(0x8000) == 0xE3 && mapper.PpuRead(0x0000) == 0x71
+        && mapper.Mirroring == Mirroring.Vertical,
+        $"got {mapper.CpuRead(0x8000):X2} {mapper.PpuRead(0x0000):X2} {mapper.Mirroring}");
+}
+
+{
+    // The MMC4 is the same chip on a larger board: sixteen kilobytes a time,
+    // and a latch that reacts to any row of tile $FD or $FE rather than one.
+    byte[] image = BuildRom(4, 4, 0xA0); // mapper 10
+    int chr = 16 + (4 * 16384);
+    for (int bank = 0; bank < 4; bank++) image[16 + (bank * 16384)] = (byte)(0xF0 + bank);
+    for (int bank = 0; bank < 8; bank++) image[chr + (bank * 4096)] = (byte)(0x70 + bank);
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    Check("mmc4: the top half is the last sixteen kilobytes",
+        mapper.CpuRead(0x8000) == 0xF0 && mapper.CpuRead(0xC000) == 0xF3,
+        $"got {mapper.CpuRead(0x8000):X2} {mapper.CpuRead(0xC000):X2}");
+    mapper.CpuWrite(0xA000, 0x02);
+    Check("mmc4: the bottom half switches",
+        mapper.CpuRead(0x8000) == 0xF2 && mapper.CpuRead(0xC000) == 0xF3,
+        $"got {mapper.CpuRead(0x8000):X2} {mapper.CpuRead(0xC000):X2}");
+
+    mapper.CpuWrite(0xB000, 0x01);
+    mapper.CpuWrite(0xC000, 0x02);
+    Check("mmc4: starts on the $FD bank", mapper.PpuRead(0x0000) == 0x71,
+        $"got {mapper.PpuRead(0x0000):X2}");
+    mapper.PpuRead(0x0FEB);
+    Check("mmc4: any row of the tile moves the latch",
+        mapper.PpuRead(0x0000) == 0x72, $"got {mapper.PpuRead(0x0000):X2}");
+
+    Check("mmc4: save RAM answers even when the header asks for none",
+        mapper.DrivesCpuRead(0x6000), "the board has eight kilobytes of it");
+    mapper.CpuWrite(0x6123, 0x9C);
+    Check("mmc4: and keeps what is written to it", mapper.CpuRead(0x6123) == 0x9C,
+        $"got {mapper.CpuRead(0x6123):X2}");
+}
+
+{
     // MMC1 takes five writes to accept one value, lowest bit first.
     byte[] image = BuildRom(4, 1, 0x10); // mapper 1
     image[16 + (0 * 16384)] = 0xB0;

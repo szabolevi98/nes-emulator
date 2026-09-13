@@ -98,6 +98,26 @@ not something to guess at: NES 2.0 submapper 2 says a cartridge behaves that
 way, and anything else is taken as the ordinary case, since ANDing a write a
 game did not expect to be ANDed sends it to the wrong bank.
 
+## A cartridge that watches the screen being drawn
+
+Most boards only ever hear from the game. The MMC2 listens to the picture unit
+instead: it watches the address of every tile fetch, and when one lands on tile
+$FD or $FE it switches the half of the pattern table that fetch came from.
+
+Punch-Out!! is why the chip exists. An opponent takes up half the screen and
+needs far more tile memory than the console can address at once, so the tiles
+are arranged with a $FD in one row and a $FE in another, and the bank flips
+underneath the beam as it crosses the sprite. The game never writes a thing
+while this happens.
+
+Two details decide whether it works. The switch takes effect after the fetch
+that caused it, so the triggering tile is drawn from the old bank and everything
+below it from the new one — do it the other way round and the boxer tears along
+a horizontal line. And the addresses watched are narrower than they look: the
+MMC2's lower window reacts to $0FD8 and $0FE8 alone, its upper window and both
+of the MMC4's to the whole eight-address row. Those are high-plane fetches, so
+what the chip is really matching is one specific tile being drawn.
+
 ## Winding back
 
 A save state is everything that can change while a game runs — work RAM, the picture unit's memory and registers, the sound unit's counters, the cartridge's own RAM and bank registers, and the finished picture so that loading mid-frame does not show half of the old one. The cartridge ROM is not in it, which is what keeps a state to about seventy kilobytes.
