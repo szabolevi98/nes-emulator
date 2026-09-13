@@ -80,6 +80,24 @@ any write landing on the cycle after another one, taking a run of them as the
 first alone — without that filter the second write clocks a stray bit in and
 the game ends up on a bank it never asked for.
 
+## A board with no fixed half
+
+Most boards keep part of the window still so the processor always has ground to
+stand on. The AxROM boards behind Battletoads and Marble Madness keep none of
+it: one write swaps all thirty-two kilobytes, interrupt vectors included, so the
+code doing the swapping has to exist at the same address in every bank or the
+next instruction comes from somewhere unintended.
+
+The same write also picks the name table. These boards wire only one, so the
+picture is single screen and bit four says which — there is no horizontal or
+vertical arrangement to read out of the header at all.
+
+A few variants let the ROM answer a write alongside the latch, so the chip
+receives the written value ANDed with the byte already at that address. That is
+not something to guess at: NES 2.0 submapper 2 says a cartridge behaves that
+way, and anything else is taken as the ordinary case, since ANDing a write a
+game did not expect to be ANDed sends it to the wrong bank.
+
 ## Winding back
 
 A save state is everything that can change while a game runs — work RAM, the picture unit's memory and registers, the sound unit's counters, the cartridge's own RAM and bank registers, and the finished picture so that loading mid-frame does not show half of the old one. The cartridge ROM is not in it, which is what keeps a state to about seventy kilobytes.

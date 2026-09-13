@@ -52,6 +52,7 @@ public interface IMapper
         2 => new UxRom(cartridge),
         3 => new CnRom(cartridge),
         4 => new Mmc3(cartridge, mmc3Revision),
+        7 => new AxRom(cartridge),
         _ => throw new NotSupportedException(
             $"Mapper {cartridge.MapperNumber} is not implemented yet."),
     };

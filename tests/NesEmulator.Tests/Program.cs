@@ -832,6 +832,72 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
 }
 
 {
+    // AxROM swaps the whole window at once, so the byte at $8000 and the byte at
+    // $C000 both come from the same bank.
+    byte[] image = BuildRom(8, 0, 0x70); // mapper 7, tiles in RAM
+    image[16 + (0 * 32768)] = 0xB0;
+    image[16 + (0 * 32768) + 0x4000] = 0xB1;
+    image[16 + (3 * 32768)] = 0xB6;
+    image[16 + (3 * 32768) + 0x4000] = 0xB7;
+    IMapper mapper = IMapper.Create(Cartridge.FromBytes(image));
+
+    Check("axrom: starts on the first bank",
+        mapper.CpuRead(0x8000) == 0xB0 && mapper.CpuRead(0xC000) == 0xB1,
+        $"got {mapper.CpuRead(0x8000):X2} {mapper.CpuRead(0xC000):X2}");
+
+    mapper.CpuWrite(0x8000, 0x03);
+    Check("axrom: one write moves both halves",
+        mapper.CpuRead(0x8000) == 0xB6 && mapper.CpuRead(0xC000) == 0xB7,
+        $"got {mapper.CpuRead(0x8000):X2} {mapper.CpuRead(0xC000):X2}");
+
+    Check("axrom: the picture is single screen, lower by default",
+        mapper.Mirroring == Mirroring.SingleScreenLower, $"got {mapper.Mirroring}");
+    mapper.CpuWrite(0x8000, 0x13);
+    Check("axrom: bit four picks the other name table",
+        mapper.Mirroring == Mirroring.SingleScreenUpper, $"got {mapper.Mirroring}");
+    Check("axrom: the name table bit does not disturb the bank",
+        mapper.CpuRead(0x8000) == 0xB6, $"got {mapper.CpuRead(0x8000):X2}");
+
+    MemoryStream saved = new();
+    mapper.SaveState(new BinaryWriter(saved));
+    mapper.CpuWrite(0x8000, 0x00);
+    saved.Position = 0;
+    mapper.LoadState(new BinaryReader(saved));
+    Check("axrom: a state carries both the bank and the name table",
+        mapper.CpuRead(0x8000) == 0xB6 && mapper.Mirroring == Mirroring.SingleScreenUpper,
+        $"got {mapper.CpuRead(0x8000):X2} {mapper.Mirroring}");
+}
+
+{
+    // Submapper 2 is the variant where the ROM answers a write as well, so the
+    // value that reaches the latch is what the game wrote ANDed with what was
+    // already there. Writing 3 to an address holding 1 selects bank 1.
+    byte[] image = new byte[16 + (4 * 32768)];
+    "NES"u8.CopyTo(image);
+    image[3] = 0x1A;
+    image[4] = 8;            // 8 x 16 KB = four 32 KB banks
+    image[6] = 0x70;         // mapper 7
+    image[7] = 0x08;         // NES 2.0
+    image[8] = 0x20;         // submapper 2
+    image[11] = 0x07;        // 8 KB of tile RAM
+    image[16 + 0x0000] = 0x01;
+    image[16 + (1 * 32768)] = 0xD1;
+    image[16 + (3 * 32768)] = 0xD3;
+    IMapper conflicting = IMapper.Create(Cartridge.FromBytes(image));
+
+    conflicting.CpuWrite(0x8000, 0x03);
+    Check("axrom: a conflicting board ANDs the write with the ROM",
+        conflicting.CpuRead(0x8000) == 0xD1, $"got {conflicting.CpuRead(0x8000):X2}");
+
+    // The same image without the submapper takes the write as it stands.
+    image[8] = 0x00;
+    IMapper plain = IMapper.Create(Cartridge.FromBytes(image));
+    plain.CpuWrite(0x8000, 0x03);
+    Check("axrom: an ordinary board takes the write as written",
+        plain.CpuRead(0x8000) == 0xD3, $"got {plain.CpuRead(0x8000):X2}");
+}
+
+{
     // MMC1 takes five writes to accept one value, lowest bit first.
     byte[] image = BuildRom(4, 1, 0x10); // mapper 1
     image[16 + (0 * 16384)] = 0xB0;
