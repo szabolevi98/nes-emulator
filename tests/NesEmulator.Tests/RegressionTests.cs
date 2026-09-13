@@ -10,6 +10,7 @@ internal static class RegressionTests
     public static void Run(Action<string, bool> check)
     {
         InterruptTiming(check);
+        PpuMapperTiming(check);
         void BusTrace(string name, byte[] program, ushort[] reads, Action<Cpu6502, TraceBus>? setup = null)
         {
             TraceBus bus = new();
@@ -241,6 +242,97 @@ internal static class RegressionTests
                 ? next == 7 && cpu.PC == handler && cpu.X == 0
                 : next == 2 && cpu.PC == target + 1 && cpu.X == 1 && cpu.Step() == 7 && cpu.PC == handler);
             check($"{name}: {(nmi ? "NMI" : "IRQ")} asserted on cycle {edge}", matches);
+        }
+    }
+
+    private static void PpuMapperTiming(Action<string, bool> check)
+    {
+        foreach (byte control in new byte[] { 0x00, 0x10 })
+        {
+            PpuTraceMapper mapper = new(IMapper.Create(Cartridge.FromBytes(Image(0))));
+            Ppu2C02 ppu = new(mapper);
+            ppu.WriteRegister(0x2000, control);
+            ppu.WriteRegister(0x2001, 0x08);
+            void Tick()
+            {
+                mapper.Line = ppu.Scanline; mapper.Dot = ppu.Cycle;
+                ppu.Step();
+            }
+            while (ppu.Scanline != 0 || ppu.Cycle != 6) Tick();
+            var boundary = mapper.Addresses.Where(a => a.Line == -1 && a.Dot >= 337 || a.Line == 0 && a.Dot <= 5).ToArray();
+            ushort pattern = control == 0 ? (ushort)0 : (ushort)0x1000;
+            check($"PPU bus ${control:X2}: end-of-line address schedule", boundary.SequenceEqual(new[]
+            {
+                (-1, 337, (ushort)0x2002), (-1, 339, (ushort)0x2002), (-1, 340, pattern),
+                (0, 1, (ushort)0x2002), (0, 3, (ushort)0x23C0), (0, 5, pattern),
+            }));
+            check($"PPU bus ${control:X2}: aborted fetch has no cartridge read",
+                !mapper.Reads.Contains((-1, 340)) && mapper.Reads.Contains((0, 5)));
+            while (!ppu.FrameComplete) Tick();
+            mapper.Addresses.Clear();
+            while (ppu.Scanline != 0 || ppu.Cycle != 6) Tick();
+            check($"PPU bus ${control:X2}: odd pre-render skip omits the aborted fetch",
+                !mapper.Addresses.Any(a => a.Line == -1 && a.Dot == 340) &&
+                mapper.Addresses.Any(a => a.Line == -1 && a.Dot == 339));
+        }
+
+        foreach (byte control in new byte[] { 0x08, 0x10 })
+        foreach (byte mask in new byte[] { 0x08, 0x10, 0x18 })
+        {
+            byte[] image = Image(0); image[6] = 0x40;
+            Mmc3 mapper = new(Cartridge.FromBytes(image));
+            Ppu2C02 ppu = new(mapper);
+            ppu.WriteRegister(0x2000, control);
+            ppu.WriteRegister(0x2001, mask);
+            mapper.CpuWrite(0xC000, 0);
+            mapper.CpuWrite(0xC001, 0);
+            mapper.CpuWrite(0xE001, 0);
+            for (int frame = 0; frame < 2; frame++)
+            {
+                List<(int Line, int Dot)> edges = [];
+                ppu.FrameComplete = false;
+                while (!ppu.FrameComplete)
+                {
+                    (int line, int dot) = (ppu.Scanline, ppu.Cycle);
+                    ppu.Step();
+                    if (!mapper.IrqPending) continue;
+                    edges.Add((line, dot));
+                    mapper.CpuWrite(0xE000, 0);
+                    mapper.CpuWrite(0xE001, 0);
+                }
+                List<(int Line, int Dot)> expected = [];
+                for (int line = -1; line < 240; line++)
+                {
+                    if (control == 0x08) expected.Add((line, 261));
+                    else
+                    {
+                        // At construction fewer than eight dots precede the
+                        // first pattern fetch. Only the odd frame's skipped
+                        // aborted fetch adds an edge at the next line's dot 5.
+                        if (line == 0 && frame == 1) expected.Add((line, 5));
+                        expected.Add((line, 325));
+                    }
+                }
+                check($"MMC3 ${control:X2}, mask ${mask:X2}, frame {frame}: qualified edges over the entire frame",
+                    edges.SequenceEqual(expected));
+            }
+        }
+    }
+
+    private sealed class PpuTraceMapper(IMapper inner) : IMapper
+    {
+        public int Line, Dot;
+        public List<(int Line, int Dot, ushort Address)> Addresses { get; } = [];
+        public List<(int Line, int Dot)> Reads { get; } = [];
+        public Mirroring Mirroring => inner.Mirroring;
+        public byte CpuRead(ushort address) => inner.CpuRead(address);
+        public void CpuWrite(ushort address, byte value) => inner.CpuWrite(address, value);
+        public byte PpuRead(ushort address) { Reads.Add((Line, Dot)); return inner.PpuRead(address); }
+        public void PpuWrite(ushort address, byte value) => inner.PpuWrite(address, value);
+        public void OnPpuAddress(ushort address, long cycle)
+        {
+            Addresses.Add((Line, Dot, address));
+            inner.OnPpuAddress(address, cycle);
         }
     }
 

@@ -52,7 +52,7 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | mmc3_test_2/rom_singles/1-clocking.nes | PASS | Passed | b06d8a97f0ca672be92c841d6af7d1e650696e86e9cc0cf6eeb90d67a6ab499b |
 | mmc3_test_2/rom_singles/2-details.nes | PASS | Passed | e7af16c764b119e60effb7b1cfeec3dd8e2e657041283693cdbbeedb4081f1e3 |
 | mmc3_test_2/rom_singles/3-A12_clocking.nes | PASS | Passed | b375f15b9f9d372c8084b9c50928be9e41a3ac48be831ce82d203c18891433ad |
-| mmc3_test_2/rom_singles/4-scanline_timing.nes | FAIL (12) | Scanline 239 IRQ should occur later when $2000=$10 4-scanline_timing Failed #12 | 14a220b9d1272acc7a820ab38e9762a7cdf2d54c65e753be87f23dfcaf1bb845 |
+| mmc3_test_2/rom_singles/4-scanline_timing.nes | PASS | Passed | 14a220b9d1272acc7a820ab38e9762a7cdf2d54c65e753be87f23dfcaf1bb845 |
 | mmc3_test_2/rom_singles/5-MMC3.nes | PASS | Passed | e0824123d60b83868dac1189b28250f8e10376a01be468a5a74aa59937cb32ca |
 | mmc3_test_2/rom_singles/6-MMC3_alt.nes | FAIL (2) | IRQ shouldn't be set when reloading to 0 due to counter naturally reaching 0 previously 6-MMC3_alt Failed #2 | 56698b6918453d161a8d4e51f66e363d6966b054939c8176c53c401a6b55269b |
 | ppu_vbl_nmi/rom_singles/01-vbl_basics.nes | PASS | Passed | 06aea5af4edab4e3141c939cd5ac9936f8758203b25dcaf84ae1a09db49e024a |
@@ -66,4 +66,4 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | ppu_vbl_nmi/rom_singles/09-even_odd_frames.nes | PASS | Passed | 1ac04283021ddd9294cc74ee709c55e20a350dc4815c15a8a93b3654837e858d |
 | ppu_vbl_nmi/rom_singles/10-even_odd_timing.nes | PASS | Passed | 7217d2d172ce11ad45c4da40c2f22201cf0eb758bc2cd8dd39d2cf0a7d4ca83e |
 
-51/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.
+52/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.

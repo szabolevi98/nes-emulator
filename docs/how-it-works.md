@@ -27,6 +27,8 @@ So the renderer follows the beam rather than walking tiles. Its scroll position 
 
 Two kilobytes of name table memory has to cover four screens, so the cartridge wires the same memory into two of the four slots. Which two is what mirroring means, and it is why the demo cartridge scrolls sideways forever across a single screen of tiles.
 
+Cartridges also see PPU addresses that never become completed reads. The aborted pattern fetch at the end of a line changes A12 and affects MMC3 interrupt counting. It is sent to the mapper's address observer without reading CHR data; the odd pre-render skip omits it along with the skipped dot.
+
 ## Why the sound is not a sum
 
 Five channels — two square waves, a triangle, a noise generator and a sample player — feed a resistor ladder rather than an adder. The result is not linear: a loud channel compresses the others, so the same note is quieter in a busy passage than in a bare one. Adding the channels together instead is the usual reason an emulator sounds harsh and thin, so the mixer here uses the published approximations of that ladder.

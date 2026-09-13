@@ -390,6 +390,13 @@ public sealed class Ppu2C02
 
     private void StepBackgroundFetch()
     {
+        // The shifters start advancing at dot 2, but the first nametable
+        // address is already driven at dot 1.
+        if (Cycle == 1)
+        {
+            _nameTableByte = PpuRead((ushort)(0x2000 | (_v & 0x0FFF)));
+        }
+
         if ((Cycle >= 2 && Cycle < 258) || (Cycle >= 321 && Cycle < 338))
         {
             ShiftBackground();
@@ -450,10 +457,19 @@ public sealed class Ppu2C02
             CopyHorizontalBits();
         }
 
-        // Two redundant name table reads that some mappers count on to time themselves.
-        if (Cycle == 338 || Cycle == 340)
+        // The first redundant nametable fetch is already made at dot 337.
+        if (Cycle == 339)
         {
             _nameTableByte = PpuRead((ushort)(0x2000 | (_v & 0x0FFF)));
+        }
+
+        // The final dot starts an aborted pattern fetch: the address reaches
+        // the cartridge even though no data is read. It breaks the long A12-low
+        // interval before the next line when backgrounds use $1000. The odd
+        // pre-render skip omits this dot and can therefore add one MMC3 clock.
+        if (Cycle == 340)
+        {
+            _mapper.OnPpuAddress(BackgroundPatternAddress(0), _clock);
         }
 
         if (Scanline == PreRenderScanline && Cycle >= 280 && Cycle < 305)

@@ -38,10 +38,22 @@ Offline tests sweep NMI assertion across all seven BRK/IRQ entry cycles, checkin
 
 References: [CPU interrupt polling](https://www.nesdev.org/wiki/Interrupts), [Visual6502 interrupt hijacking](https://www.nesdev.org/wiki/Visual6502wiki/6502_Interrupt_Hijacking), and the pinned [CPU interrupt test sources](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/cpu_interrupts_v2/source).
 
+## MMC3 and the aborted PPU fetch
+
+The fourth milestone makes `mmc3_test_2/4-scanline_timing` pass, bringing that group to **5/6** and the full public suite to **52/55**. The remaining MMC3 ROM targets the alternate IRQ-counter revision.
+
+The last PPU dot drives a background pattern address without completing a memory read. This aborted fetch was missing: with backgrounds in `$1000`, A12 stayed low long enough to count an extra edge at the next line's first pattern fetch. The mapper now sees that address, but its CHR read handler is not called. The odd pre-render skip naturally omits the aborted fetch. The redundant nametable accesses are at dots 337 and 339, followed by the next line's first nametable access at dot 1.
+
+These positions use the emulator's existing state-machine dot numbering, in which the skipped dot is the final pre-render dot. The aborted access is also described as the next line's idle dot in descriptions that number the external PPU signals one dot later. The public ROM checks IRQ timing on scanlines 0, 1 and 239 in both pattern-table configurations.
+
+Offline bus traces distinguish address changes from CHR reads. Whole-frame checks exercise background-only, sprite-only and combined rendering across even and odd frames. The MMC3 filter still approximates three M2 falling edges as an eight-PPU-dot low interval; exact M2 phase tracking remains future work.
+
+References: [PPU rendering](https://www.nesdev.org/wiki/PPU_rendering), [hardware explanation of the aborted fetch and MMC3](https://forums.nesdev.org/viewtopic.php?t=25255), and the pinned [scanline timing test](https://github.com/christopherpow/nes-test-roms/blob/95d8f621ae55cee0d09b91519a8989ae0e64753b/mmc3_test_2/source/4-scanline_timing.s).
+
 ## Validation and save compatibility
 
-- 364 offline checks, including status/NMI reads across five adjacent dots, repeated NMI edges, CPU interrupt entry and branch polling, odd-frame boundaries, APU reset and IRQ boundaries, and real v2/v3 state migration fixtures.
-- The complete public ROM report retains all four failures and their messages.
+- 382 offline checks, including status/NMI reads across five adjacent dots, repeated NMI edges, CPU interrupt entry and branch polling, odd-frame and PPU bus boundaries, APU reset and IRQ boundaries, and real v2/v3 state migration fixtures.
+- The complete public ROM report retains all three failures and their messages.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
@@ -56,7 +68,7 @@ dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cp
 ## Next targets
 
 1. DMC prefetch and CPU/OAM DMA bus arbitration.
-2. MMC3 A12 fetch timing and an explicit MMC3A revision option.
+2. An explicit MMC3A revision option and exact M2-phase filtering of A12.
 3. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
 
 Each milestone should retain the previous passing checks and report its remaining mismatches. Sprite evaluation and DMA interactions need coverage beyond the present 55-ROM set.
