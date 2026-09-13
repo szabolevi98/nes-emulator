@@ -83,6 +83,7 @@ public sealed class Apu2A03
         _bufferedCount = 0;
         _sampleCounter = 0;
         WriteRegister(0x4015, 0);
+        Dmc.CancelDma();
         _resampler.Reset(Mix());
     }
 
@@ -379,13 +380,13 @@ public sealed class Apu2A03
         writer.Write(_frameResetDelay);
     }
 
-    internal void LoadState(BinaryReader reader, bool legacy = false, bool legacyDmc = false)
+    internal void LoadState(BinaryReader reader, bool legacy = false, bool legacyDmc = false, bool legacyStop = false)
     {
         Pulse1.LoadState(reader);
         Pulse2.LoadState(reader);
         Triangle.LoadState(reader);
         Noise.LoadState(reader);
-        Dmc.LoadState(reader, legacyDmc);
+        Dmc.LoadState(reader, legacyDmc, legacyStop);
         _cycle = reader.ReadInt64();
         _frameCounter = reader.ReadInt32();
         _fiveStepMode = reader.ReadBoolean();

@@ -36,6 +36,8 @@ public sealed class DmcChannel
     private bool _bufferEmpty = true;
     private int _dmaDelay = -1;
     private bool _getCycle = true;
+    private int _stopDelay;
+    private byte _outputReloadAge = 2;
 
     /// <summary>Optional reader for standalone channel tests. The console uses DMA instead.</summary>
     public Func<ushort, byte>? ReadMemory { get; set; }
@@ -73,8 +75,9 @@ public sealed class DmcChannel
     {
         if (!enabled)
         {
-            _bytesRemaining = 0;
-            _dmaDelay = -1;
+            // The stop propagates on the PUT phase of the following APU cycle.
+            // A reload can still halt the CPU before this reaches the reader.
+            if (_stopDelay == 0) _stopDelay = _getCycle ? 3 : 2;
             return;
         }
 
@@ -96,6 +99,8 @@ public sealed class DmcChannel
     public void Clock()
     {
         _getCycle = !_getCycle;
+        if (_outputReloadAge < 2) _outputReloadAge++;
+        if (_stopDelay > 0 && --_stopDelay == 0) CancelDma();
         if (_dmaDelay > 0) _dmaDelay--;
         if (_dmaDelay == 0 && ReadMemory is not null && Active && _bufferEmpty)
             CompleteDma(ReadMemory(_currentAddress));
@@ -133,6 +138,7 @@ public sealed class DmcChannel
         }
 
         _bitsRemaining = 8;
+        _outputReloadAge = 0;
         _silence = _bufferEmpty;
         if (!_bufferEmpty)
         {
@@ -145,6 +151,9 @@ public sealed class DmcChannel
 
     internal void CompleteDma(byte value)
     {
+        // A transfer already past its halt can finish on the bus after a stop,
+        // but the disabled reader does not accept that byte.
+        if (!Active) return;
         _sampleBuffer = value;
         _bufferEmpty = false;
         _dmaDelay = -1;
@@ -160,6 +169,34 @@ public sealed class DmcChannel
             if (_loop) Restart();
             else if (_irqEnabled) IrqPending = true;
         }
+
+        if (_sampleLength == 1)
+        {
+            if (_outputReloadAge < 2)
+            {
+                // Late RP2A03G/H: a fetch on the output reload cycle supplies
+                // the shifter and also requests the same byte a second time.
+                _shiftRegister = value;
+                _silence = false;
+                _bufferEmpty = true;
+                Restart();
+                _dmaDelay = 1;
+            }
+            else if (!_loop && _bitsRemaining == 1 && _timer <= 1)
+            {
+                // One APU cycle earlier, the reader's stop reaches DMA only
+                // after its next halt. A write on that halt cancels it entirely.
+                Restart();
+                _stopDelay = 3;
+            }
+        }
+    }
+
+    internal void CancelDma()
+    {
+        _bytesRemaining = 0;
+        _dmaDelay = -1;
+        _stopDelay = 0;
     }
 
     public int Output() => OutputLevel;
@@ -183,9 +220,11 @@ public sealed class DmcChannel
         writer.Write(_bufferEmpty);
         writer.Write(_dmaDelay);
         writer.Write(_getCycle);
+        writer.Write(_stopDelay);
+        writer.Write(_outputReloadAge);
     }
 
-    internal void LoadState(BinaryReader reader, bool legacy = false)
+    internal void LoadState(BinaryReader reader, bool legacy = false, bool legacyStop = false)
     {
         _timer = reader.ReadInt32();
         _timerPeriod = reader.ReadInt32();
@@ -204,6 +243,10 @@ public sealed class DmcChannel
         _bufferEmpty = legacy || reader.ReadBoolean();
         _dmaDelay = legacy ? -1 : reader.ReadInt32();
         _getCycle = legacy || reader.ReadBoolean();
+        _stopDelay = legacy || legacyStop ? 0 : reader.ReadInt32();
+        // Older states have no output-boundary latch. DMA completes within an
+        // instruction, so an immediate duplicate is already resolved there.
+        _outputReloadAge = legacy || legacyStop ? (byte)2 : reader.ReadByte();
     }
 
     internal void RestoreLegacyDmaPhase(long cycle)

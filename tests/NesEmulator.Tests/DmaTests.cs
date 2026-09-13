@@ -4,11 +4,13 @@ using NesEmulator.Core.Cartridges;
 using NesEmulator.Core.Cpu;
 using NesEmulator.Core.Input;
 using NesEmulator.Core.Memory;
+using System.IO.Compression;
 
 internal static class DmaTests
 {
     public static void Run(Action<string, bool> check)
     {
+        StopTests(check);
         foreach (int parity in new[] { 0, 1 })
         {
             Rig rig = new([0xEA, 0xEA, 0xEA, 0xEA]);
@@ -154,6 +156,172 @@ internal static class DmaTests
             nes.Reset();
             check("reset: cancels pending OAM and DMC halts", nes.Cpu.Cycles - cycles == 7 && !nes.Apu.Dmc.Active && nes.Bus.RunDma(nes.Cpu) == 0);
             check("reset: DMA phase advances with the seven reset cycles", nes.Apu.Dmc.NextCycleIsGet != nextGet);
+        }
+    }
+
+    private static void StopTests(Action<string, bool> check)
+    {
+        {
+            DmcChannel dmc = new();
+            for (int i = 0; i < 175; i++) dmc.Clock();
+            // The running divider now happens to equal the new period minus
+            // one. Changing the rate must not invent an output reload edge.
+            dmc.WriteControl(0x85);
+            dmc.SetEnabled(true);
+            dmc.CompleteDma(0xFF);
+            check("DMC rate change: matching divider values do not duplicate a sample", !dmc.Active && !dmc.DmaPending && dmc.IrqPending);
+        }
+        foreach (int phase in new[] { 0, 1 })
+        {
+            DmcChannel dmc = new();
+            if (phase == 1) dmc.Clock();
+            dmc.SetEnabled(true);
+            dmc.SetEnabled(false);
+            int delay = phase == 0 ? 3 : 2;
+            dmc.Clock();
+            dmc.SetEnabled(false); // A second write cannot postpone the stop.
+            dmc.SetEnabled(true); // Re-enabling an active reader cannot restart it.
+            for (int i = 1; i < delay - 1; i++) dmc.Clock();
+            check($"DMC stop phase {phase}: status stays active until propagation completes", dmc.Active);
+            dmc.Clock();
+            check($"DMC stop phase {phase}: repeated writes preserve the original deadline", !dmc.Active && !dmc.DmaPending);
+        }
+        Rig Prime()
+        {
+            Rig rig = new([0xEA]);
+            rig.Nes.Apu.WriteRegister(0x4010, 0x4F);
+            rig.Nes.Apu.WriteRegister(0x4015, 0x10);
+            while (!rig.Nes.Apu.Dmc.DmaPending) rig.Cpu.DmaRead(0);
+            rig.Nes.Bus.RunDma(rig.Cpu);
+            return rig;
+        }
+        Rig probe = Prime();
+        while (!probe.Nes.Apu.Dmc.DmaPending) probe.Cpu.DmaRead(0);
+        long halt = probe.Cpu.Cycles + 1;
+        foreach (int distance in new[] { 6, 5, 4, 3, 2, 1 })
+        {
+            Rig rig = Prime();
+            while (rig.Cpu.Cycles < halt - distance) rig.Cpu.DmaRead(0);
+            rig.Nes.Apu.WriteRegister(0x4015, 0);
+            rig.Trace.Clear();
+            int stolen = 0;
+            while (rig.Cpu.Cycles < halt + 8)
+            {
+                stolen += rig.Nes.Bus.RunDma(rig.Cpu, 0x200);
+                rig.Cpu.DmaRead(0x200);
+            }
+            int expected = distance is 2 or 3 ? 1 : distance == 1 ? 4 : 0;
+            check($"DMC explicit stop {distance} cycles before reload: {expected} stolen cycles", stolen == expected);
+            check($"DMC explicit stop {distance}: only a started transfer finishes its bus read",
+                rig.Trace.Count(a => a.Address == 0xC000) == (distance == 1 ? 1 : 0) && !rig.Nes.Apu.Dmc.Active);
+        }
+
+        foreach (bool write in new[] { false, true })
+        {
+            Rig rig = Prime();
+            while (rig.Cpu.Cycles < halt - 3) rig.Cpu.DmaRead(0);
+            rig.Nes.Apu.WriteRegister(0x4015, 0);
+            while (rig.Cpu.Cycles < halt - 1) rig.Cpu.DmaRead(0);
+            if (write) rig.Cpu.DmaWrite(0x20, 0xA5);
+            int cycles = rig.Nes.Bus.RunDma(rig.Cpu, 0x200);
+            check($"DMC aborted halt: {(write ? "a write cancels it instead of deferring" : "a read is held for one cycle")}", cycles == (write ? 0 : 1));
+        }
+
+        foreach (ushort port in new ushort[] { 0x4016, 0x4017 })
+        {
+            Rig rig = Prime();
+            Controller pad = port == 0x4016 ? rig.Nes.Port1 : rig.Nes.Port2;
+            pad.Buttons = NesButton.B;
+            rig.Nes.Bus.Write(0x4016, 1); rig.Nes.Bus.Write(0x4016, 0);
+            while (rig.Cpu.Cycles < halt - 3) rig.Cpu.DmaRead(0);
+            rig.Nes.Apu.WriteRegister(0x4015, 0);
+            while (rig.Cpu.Cycles < halt - 1) rig.Cpu.DmaRead(0);
+            int cycles = rig.Nes.Bus.RunDma(rig.Cpu, port);
+            byte value = rig.Cpu.DmaRead(port);
+            check($"DMC aborted ${port:X4} read: halt and resumed read share one controller clock",
+                cycles == 1 && (value & 1) == 0 && (pad.Read() & 1) == 1);
+        }
+
+        {
+            Rig rig = Prime();
+            while (rig.Cpu.Cycles < halt - 3) rig.Cpu.DmaRead(0);
+            for (int i = 0; i < 256; i++) rig.Nes.Bus.Write((ushort)(0x300 + i), (byte)(i ^ 0xA5));
+            rig.Nes.Apu.WriteRegister(0x4015, 0);
+            rig.Nes.Bus.Write(0x4014, 3);
+            rig.Trace.Clear();
+            int cycles = rig.Nes.Bus.RunDma(rig.Cpu, 0x200);
+            check("DMC abort during OAM: the abort adds no transfer cycles", cycles == 513 && !rig.Trace.Any(a => a.Address == 0xC000));
+            check("DMC abort during OAM: all 256 sprite writes still complete",
+                rig.Trace.Where(a => a.Address == 0x2004 && a.Write).Select(a => a.Value)
+                    .SequenceEqual(Enumerable.Range(0, 256).Select(i => (byte)(i ^ 0xA5))));
+        }
+
+        foreach (int phase in new[] { 0, 1 })
+        foreach (int elapsed in new[] { 0, 1, 2 })
+        {
+            Nes nes = NewNes();
+            nes.Cpu.PC = 0x200;
+            nes.Bus.Write(0x200, 0x4C); nes.Bus.Write(0x201, 0); nes.Bus.Write(0x202, 2);
+            nes.Apu.WriteRegister(0x4010, 0x4F);
+            nes.Apu.WriteRegister(0x4015, 0x10);
+            nes.StepInstruction(); nes.StepInstruction();
+            if ((nes.Cpu.Cycles & 1) != phase) nes.Cpu.DmaRead(0);
+            nes.Apu.WriteRegister(0x4015, 0);
+            for (int i = 0; i < elapsed; i++) nes.Cpu.DmaRead(0);
+            byte[] saved = Save(nes);
+            for (int i = 0; i < 300; i++) nes.StepInstruction();
+            byte[] expected = Save(nes);
+            nes.LoadState(new MemoryStream(saved));
+            for (int i = 0; i < 300; i++) nes.StepInstruction();
+            check($"DMC stop state: phase {phase}, delay advanced {elapsed} cycles replays", Save(nes).SequenceEqual(expected));
+        }
+
+        foreach (int distance in new[] { 11, 9, 7, 5 })
+        foreach (bool write in new[] { false, true })
+        {
+            Rig rig = Prime();
+            rig.Nes.Apu.WriteRegister(0x4010, 0x8F); // One byte, no loop, IRQ.
+            rig.Nes.Apu.WriteRegister(0x4015, 0);
+            // The retained byte enters the shifter at the first reload boundary.
+            // Arrange a new load around the next boundary, eight 54-cycle bits later.
+            long nextHalt = halt + 8 * 54;
+            while (rig.Cpu.Cycles < nextHalt - distance) rig.Cpu.DmaRead(0);
+            rig.Nes.Apu.WriteRegister(0x4015, 0x10);
+            rig.Trace.Clear();
+            int stolen = 0;
+            while (rig.Cpu.Cycles < nextHalt + 10)
+            {
+                if (write && rig.Cpu.Cycles + 1 == nextHalt) rig.Cpu.DmaWrite(0x20, 0xA5);
+                else
+                {
+                    stolen += rig.Nes.Bus.RunDma(rig.Cpu, 0x200);
+                    rig.Cpu.DmaRead(0x200);
+                }
+            }
+            var fetches = rig.Trace.Where(a => a.Address == 0xC000).ToArray();
+            // A duplicate follows immediately: the CPU never resumes to write
+            // between the load and its second fetch. Only the later abort can
+            // collide with a CPU write.
+            int expected = distance == 7 ? 7 : distance == 9 && !write ? 4 : 3;
+            check($"DMC implicit stop: load {distance} cycles before reload, halt write {write}", stolen == expected);
+            check($"DMC implicit stop {distance}/{write}: duplicate fetch uses the same address and retains IRQ",
+                fetches.Length == (distance == 7 ? 2 : 1) && rig.Nes.Apu.Dmc.IrqPending && !rig.Nes.Apu.Dmc.Active);
+        }
+
+        foreach (int steps in new[] { 0, 20 })
+        {
+            Nes expected = NewNes();
+            expected.Cpu.PC = 0x200;
+            expected.Bus.Write(0x200, 0x4C); expected.Bus.Write(0x201, 0); expected.Bus.Write(0x202, 2);
+            expected.Apu.WriteRegister(0x4010, 0x4F); expected.Apu.WriteRegister(0x4015, 0x10);
+            for (int i = 0; i < steps; i++) expected.StepInstruction();
+            Nes actual = NewNes();
+            using Stream resource = typeof(DmaTests).Assembly.GetManifestResourceStream($"v8-dmc-{steps}.state.gz")!;
+            using GZipStream gzip = new(resource, CompressionMode.Decompress);
+            actual.LoadState(gzip);
+            check($"state v8: DMC fixture after {steps} instructions loads without a pending stop", Save(actual).SequenceEqual(Save(expected)));
+            for (int i = 0; i < 300; i++) { expected.StepInstruction(); actual.StepInstruction(); }
+            check($"state v8: DMC fixture after {steps} instructions continues identically", Save(actual).SequenceEqual(Save(expected)));
         }
     }
 

@@ -9,9 +9,10 @@ internal static class AccuracyRunner
 {
     public static int Run(string[] args)
     {
+        if (args.Length >= 2 && args[0] == "--dma-abort-suite") return DmaAbortRunner.Run(args);
         if (args.Length < 2 || args[0] is not ("--rom-suite" or "--dma-suite" or "--sprite-suite" or "--cpu-vectors"))
         {
-            Console.Error.WriteLine("Usage: --rom-suite|--dma-suite|--sprite-suite <nes-test-roms directory> [report.md] [path filter] | --cpu-vectors <JSON directory>");
+            Console.Error.WriteLine("Usage: --rom-suite|--dma-suite|--sprite-suite <nes-test-roms directory> [report.md] [path filter] | --dma-abort-suite <AccuracyCoin directory> [report.md] | --cpu-vectors <JSON directory>");
             return 2;
         }
 

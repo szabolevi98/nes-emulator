@@ -1,6 +1,6 @@
 # Public test programs only. Nothing from these downloads is committed.
 [CmdletBinding()]
-param([switch]$IncludeCpuVectors)
+param([switch]$IncludeCpuVectors, [switch]$IncludeAccuracyCoin)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -23,6 +23,26 @@ else {
     if ($changes) { throw 'The downloaded ROM repository has modified files.' }
 }
 Write-Host "Accuracy ROMs ready at $romRoot ($romRevision)."
+
+if ($IncludeAccuracyCoin) {
+    $coinRoot = Join-Path $projectRoot 'roms/accuracy-coin'
+    $coinRevision = '9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e'
+    if (!(Test-Path -LiteralPath $coinRoot)) {
+        git clone https://github.com/100thCoin/AccuracyCoin.git $coinRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Could not download AccuracyCoin.' }
+        git -C $coinRoot checkout --detach $coinRevision
+        if ($LASTEXITCODE -ne 0) { throw 'Could not check out the pinned AccuracyCoin revision.' }
+    }
+    else {
+        $actualRevision = git -C $coinRoot rev-parse HEAD
+        if ($LASTEXITCODE -ne 0 -or $actualRevision -ne $coinRevision) {
+            throw "Existing AccuracyCoin directory must be at $coinRevision; its contents were left untouched."
+        }
+        $changes = git -C $coinRoot status --porcelain --untracked-files=no
+        if ($changes) { throw 'The downloaded AccuracyCoin repository has modified files.' }
+    }
+    Write-Host "AccuracyCoin ready at $coinRoot ($coinRevision)."
+}
 
 if ($IncludeCpuVectors) {
     # Roughly 1 GB: optional so the quick local test suite stays small and offline.

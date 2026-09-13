@@ -52,3 +52,11 @@ the PPU advances to scanline 10, next dot 100 or 270. The first snapshot
 precedes the old batched evaluation; the second contains its selected sprites
 partway through pattern fetching. Both verify that v8 migration preserves
 the next line's eight visible sprites. They contain no commercial ROM data.
+
+`v8-dmc-0.state.gz` and `v8-dmc-20.state.gz` were written by the core from
+commit `67557ea`. They use `DmaTests.NewNes()` (32 KB of synthetic $55 PRG,
+8 KB of zero CHR), with `JMP $0200` in RAM, `$4010=$4F`, and `$4015=$10`.
+The snapshots follow zero or twenty instructions: the first has a pending
+load request, the second has a filled sample buffer. v9 migration must add
+no pending stop or recent output-reload edge and must preserve subsequent
+execution. These fixtures contain no commercial ROM data.

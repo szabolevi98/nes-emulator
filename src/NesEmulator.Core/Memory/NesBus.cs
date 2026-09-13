@@ -51,6 +51,7 @@ public sealed class NesBus(
     private bool _dmaActive;
     private ushort _dmaControllerAddress;
     private byte _dmaControllerValue;
+    private bool _dmaResumeRead;
 
     public int RunDma(Cpu6502 cpu) => RunDma(cpu, cpu.PC);
 
@@ -103,7 +104,7 @@ public sealed class NesBus(
                 }
 
                 // DMC halt/dummy/alignment cycles can overlap OAM reads and writes.
-                if (dmcHalt) dmcStage = 1;
+                if (dmcHalt) dmcStage = _apu.Dmc.DmaPending ? 1 : 0;
                 else if (previousStage == 1) dmcStage = 2;
                 halt = false;
             }
@@ -111,15 +112,22 @@ public sealed class NesBus(
         finally
         {
             _dmaActive = false;
-            _dmaControllerAddress = 0;
+            // An aborted halt may return straight to the same controller read,
+            // without a DMA fetch to deassert /OE between the two cycles.
+            _dmaResumeRead = _dmaControllerAddress != 0;
         }
         return (int)(cpu.Cycles - start);
     }
 
     public byte Read(ushort address)
     {
-        if (_dmaActive && _dmaControllerAddress != 0 && address == _dmaControllerAddress)
+        bool resume = _dmaResumeRead;
+        _dmaResumeRead = false;
+        if ((_dmaActive || resume) && _dmaControllerAddress != 0 && address == _dmaControllerAddress)
+        {
+            if (resume) _dmaControllerAddress = 0;
             return _openBus = _dmaControllerValue;
+        }
         _dmaControllerAddress = 0;
         byte value;
 
@@ -163,6 +171,7 @@ public sealed class NesBus(
 
     public void Write(ushort address, byte value)
     {
+        _dmaResumeRead = false;
         _dmaControllerAddress = 0;
         _openBus = value;
 

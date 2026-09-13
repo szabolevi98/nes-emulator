@@ -13,7 +13,7 @@ The [noise period table](https://www.nesdev.org/wiki/APU_Noise) is converted to 
 
 ## Validation
 
-Run `dotnet run -c Release --project tests/NesEmulator.Tests` for the 641 offline checks. Audio regressions cover all 16 noise periods against a CPU-clocked reference sequence, DMC bit spacing, prefetch, looping and DMA, APU frame-counter reset and IRQ timing, and the following at both 44.1 and 48 kHz:
+Run `dotnet run -c Release --project tests/NesEmulator.Tests` for the 690 offline checks. Audio regressions cover all 16 noise periods against a CPU-clocked reference sequence, DMC bit spacing, prefetch, looping and DMA, APU frame-counter reset and IRQ timing, and the following at both 44.1 and 48 kHz:
 
 - A 1 kHz signal remains audible with the expected filter gain.
 - A 30 Hz signal is attenuated by the output high-pass filters.
@@ -26,6 +26,6 @@ Local runs with the user's Mega Man 4 and Super Mario Bros. 3 images also genera
 
 ## Remaining limits
 
-The DMC has a separate prefetch buffer and shares CPU bus arbitration with OAM DMA. Remaining hardware cases include stop/abort glitches, hybrid internal-register selection during DMA, and adjacent PPUDATA reads. Passing the frame-counter ROMs also does not exhaust APU interactions, including simultaneous length-counter writes and clocks. The nonlinear TND mixer remains the documented lookup-table approximation, and the output filter is an approximation of the console's analog circuitry.
+The DMC has a separate prefetch buffer and shares CPU bus arbitration with OAM DMA. Explicit and implicit stop windows now pass the three selected AccuracyCoin DMA tests, using late RP2A03G/H behavior. Remaining hardware cases include hybrid internal-register selection during DMA and adjacent PPUDATA reads. Passing the frame-counter ROMs also does not exhaust APU interactions, including simultaneous length-counter writes and clocks. The nonlinear TND mixer remains the documented lookup-table approximation, and the output filter is an approximation of the console's analog circuitry.
 
-The resampler and output filters are presentation state, like queued audio. They are rebuilt from the current DAC level on reset or save-state load; their recent signal history is not serialized. Existing v2–v7 save files remain loadable (v2–v5 imply standard MMC3; v6/v7 retain their selected profile), with a short filter settling interval after a discontinuity. Emulated channel state and the fractional sample clock remain serialized; v5 additionally preserves the DMC buffer and pending DMA request, v6 identifies the MMC3 IRQ profile, v7 retains its M2 filter progress, and v8 saves partial sprite evaluation.
+The resampler and output filters are presentation state, like queued audio. They are rebuilt from the current DAC level on reset or save-state load; their recent signal history is not serialized. Existing v2–v8 save files remain loadable (v2–v5 imply standard MMC3; v6–v8 retain their selected profile), with a short filter settling interval after a discontinuity. Emulated channel state and the fractional sample clock remain serialized; v5 additionally preserves the DMC buffer and pending DMA request, v6 identifies the MMC3 IRQ profile, v7 retains its M2 filter progress, v8 saves partial sprite evaluation, and v9 retains the DMC stop delay and output-reload latch.

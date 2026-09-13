@@ -104,15 +104,31 @@ Offline coverage includes false-positive and false-negative overflow, wrapping t
 
 References: [PPU sprite evaluation](https://www.nesdev.org/wiki/PPU_sprite_evaluation), [hardware overflow test sources](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/sprite_overflow_tests/source), and [sprite-zero-hit tests](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/sprite_hit_tests_2005.10.05).
 
+## DMC stop propagation and aborted DMA
+
+The ninth milestone adds a separate, pinned AccuracyCoin subset: **3/3** selected tests pass, up from **1/3** before this change. The original OAM overlap case remains passing; explicit and implicit DMA abort now match the ROM's timing tables. These results are separate from the complete 55-ROM baseline and from the older 2-ROM DMA suite.
+
+Clearing `$4015` D4 schedules the reader's stop for the PUT phase of the following APU cycle. A second write does not postpone that deadline. A reload which halts at the stop boundary consumes one CPU read cycle; if a write prevents that halt, the request disappears. A transfer already past its halt finishes its bus access, but the disabled reader discards the byte. Buffered audio continues playing. Reset cancels requests immediately.
+
+One-byte non-looping samples can trigger the same aborted reload as their last fetch ends. On the selected late RP2A03G/H model, a fetch overlapping the output-reload APU cycle instead transfers the byte to the shifter and requests the same address again. The equivalent looping case also permits consecutive DMAs. The output-boundary latch is independent of the programmable rate, so changing `$4010` cannot manufacture a reload edge. Earlier RP2A03G behavior is not currently a selectable profile.
+
+An aborted controller read preserves the continuous read-enable signal through the resumed CPU read; it does not shift a second button out. Offline traces cover both ports, read/write cancellation, ordinary and duplicate sample fetches, IRQ status, repeated stop writes, reset and save replay. Other DMA/internal-register bus conflicts remain outside this milestone.
+
+`--dma-abort-suite` verifies the pinned ROM hash and navigates the unmodified menu using controller input. It reads results only from the ROM's own result slots after launching each test; neither results nor prerequisite state are patched. The report preserves raw result codes and all three implicit-stop timing arrays. Success `$05` identifies the late-chip behavior. This is not a score for the full AccuracyCoin collection.
+
+References: [NESdev DMA bugs and cycle diagrams](https://www.nesdev.org/wiki/DMA#Bugs), [AccuracyCoin test source](https://github.com/100thCoin/AccuracyCoin/blob/9bc42d1e3acbeeaea215b1011d58f4ce72a8a49e/AccuracyCoin.asm), and [measured results](dma-stop-results.md). Mesen's DMC reader and CPU DMA implementation were also consulted to cross-check stop propagation and buffer handling; the implementation here retains this core's existing bus-cycle scheduler.
+
 ## Validation and save compatibility
 
-- 641 offline checks, including CPU/PPU/APU timing, DMA arbitration, MMC3 revisions/M2 filtering, sprite evaluation and real v2–v7 state migration fixtures.
+- 690 offline checks, including CPU/PPU/APU timing, DMA arbitration/stop windows, MMC3 revisions/M2 filtering, sprite evaluation and real v2–v8 state migration fixtures.
 - The complete baseline ROM report retains the remaining `$AB` failure and records selected IRQ profiles; DMA results are reported separately.
 - 87 desktop input and menu checks.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
-New saves use format v8, adding 41 bytes for secondary OAM and the evaluation/fetch latches. Existing v2–v7 saves remain loadable. Older formats have no partial sprite search: migration reconstructs it from saved primary OAM during evaluation, or retains the selected sprite data during fetch/blanking, preserving existing output shifters and status flags. Earlier OAM writes within that line cannot be reconstructed; v8 captures the actual partial state. Real v7 snapshots at dots 100 and 270 verify both migration paths.
+New saves use format v9, adding five bytes for the pending DMC stop and output-reload age. Existing v2–v8 saves remain loadable, starting without a pending stop or recent output-boundary latch. Real v8 fixtures exercise a pending initial fetch and a filled sample buffer; v9 tests replay both GET/PUT stop alignments and partial delays.
+
+v8 added 41 bytes for secondary OAM and the evaluation/fetch latches. Earlier formats have no partial sprite search: migration reconstructs it from saved primary OAM during evaluation, or retains the selected sprite data during fetch/blanking, preserving existing output shifters and status flags. Earlier OAM writes within that line cannot be reconstructed; v8 captures the actual partial state. Real v7 snapshots at dots 100 and 270 verify both migration paths.
 
 v7 added one filter-progress byte to MMC3 payloads. v6 introduced the IRQ-revision byte in the header. A mismatched profile is rejected before changing live state; v2–v5 imply standard MMC3, while later formats preserve the selected profile. For pre-v7 MMC3 states, filter progress is reconstructed from the saved A12-low timestamp and elapsed PPU clock at the instruction boundary, where M2 has just fallen; both v6 profiles have real migration fixtures. v5 introduced the DMC buffer, pending DMA delay and GET/PUT phase, after the v4 APU reset delay and v3 CPU/PPU timing latches. Pre-v5 DMC states retain their output shifter and unread sample address, start with an empty prefetch buffer, and schedule a fetch if the reader is active. v2/v3 states have no pending APU reset. For v2, migration also seeds the CPU's sampled NMI level and transfers any pending PPU NMI event. The application version remains 1.0.0.
 
@@ -121,12 +137,13 @@ dotnet run -c Release --project tests/NesEmulator.Tests
 dotnet run -c Release --project tests/NesEmulator.Tests -- --rom-suite roms/accuracy docs/accuracy-results.md
 dotnet run -c Release --project tests/NesEmulator.Tests -- --dma-suite roms/accuracy docs/dma-results.md
 dotnet run -c Release --project tests/NesEmulator.Tests -- --sprite-suite roms/accuracy docs/sprite-results.md
+dotnet run -c Release --project tests/NesEmulator.Tests -- --dma-abort-suite roms/accuracy-coin docs/dma-stop-results.md
 dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cpu-vectors
 ```
 
 ## Next targets
 
-1. Remaining DMA quirks: stop/abort windows, hybrid `$4000–$401F` register selection during DMA, and adjacent PPUDATA-read behavior. These are not established by the current passing suites.
+1. Remaining DMA quirks: hybrid `$4000–$401F` register selection during DMA and adjacent PPUDATA-read behavior. These are not established by the current passing suites.
 2. OAMADDR/write corruption, rendering-time OAM accesses, and PPUMASK transition behavior, with additional public suites.
 
 Each milestone should retain the previous passing checks and report its remaining mismatches. The additional DMA and sprite suites extend coverage beyond the original 55-ROM set; they do not prove every PPU/bus interaction.

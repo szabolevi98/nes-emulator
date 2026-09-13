@@ -5,5 +5,6 @@
 
 # Downloaded public validation data and local diagnostic reports.
 /accuracy/
+/accuracy-coin/
 /cpu-vectors/
 /*-results.*
