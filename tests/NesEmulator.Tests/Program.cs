@@ -642,6 +642,70 @@ byte[] BuildRom(int prgBanks, int chrBanks, byte flags6 = 0, byte flags7 = 0)
     Check("rom: rejects a truncated image", threw);
 }
 
+// ------------------------------------------------------------------ NES 2.0
+
+{
+    // A NES 2.0 header, with the sizes and shift counts the format adds.
+    byte[] BuildNes20(byte prgLow, int prgHigh, byte chrLow, int chrHigh,
+        byte byte8 = 0, byte ramByte = 0, byte chrRamByte = 0, byte timing = 0)
+    {
+        int prg = prgHigh == 0x0F
+            ? (1 << ((prgLow >> 2) & 0x3F)) * (((prgLow & 3) * 2) + 1)
+            : ((prgHigh << 8) | prgLow) * 16384;
+        int chr = chrHigh == 0x0F
+            ? (1 << ((chrLow >> 2) & 0x3F)) * (((chrLow & 3) * 2) + 1)
+            : ((chrHigh << 8) | chrLow) * 8192;
+
+        byte[] image = new byte[16 + prg + chr];
+        "NES"u8.CopyTo(image);
+        image[4] = prgLow;
+        image[5] = chrLow;
+        image[7] = 0x08;                                   // marks the header as NES 2.0
+        image[8] = byte8;
+        image[9] = (byte)((chrHigh << 4) | prgHigh);
+        image[10] = ramByte;
+        image[11] = chrRamByte;
+        image[12] = timing;
+        return image;
+    }
+
+    {
+        // $F in the size nibble means the low byte is an exponent and a small odd
+        // multiplier instead of a count of banks: 2^14 x 1 is 16 KB.
+        Cartridge cartridge = Cartridge.FromBytes(BuildNes20(14 << 2, 0x0F, 0, 0, chrRamByte: 0x07));
+        Check("nes 2.0: a size can be written as an exponent",
+            cartridge.PrgRom.Length == 16384, $"got {cartridge.PrgRom.Length}");
+        Check("nes 2.0: character RAM is sized by its own shift count",
+            cartridge.ChrIsRam && cartridge.Chr.Length == 8192, $"got {cartridge.Chr.Length}");
+    }
+
+    {
+        // Shift counts, not bank counts: 64 << 7 is 8 KB on each chip.
+        Cartridge cartridge = Cartridge.FromBytes(BuildNes20(1, 0, 1, 0, ramByte: 0x77));
+        Check("nes 2.0: save RAM counts the volatile and battery chips separately",
+            cartridge.PrgRamSize == 16384 && cartridge.PrgNvramSize == 8192,
+            $"got {cartridge.PrgRamSize} with {cartridge.PrgNvramSize} battery backed");
+    }
+
+    {
+        Cartridge cartridge = Cartridge.FromBytes(BuildNes20(1, 0, 1, 0, byte8: 0x35, timing: 1));
+        Check("nes 2.0: the mapper number reaches into byte 8",
+            cartridge.MapperNumber == 0x500, $"got {cartridge.MapperNumber}");
+        Check("nes 2.0: the submapper comes from the same byte",
+            cartridge.Submapper == 3, $"got {cartridge.Submapper}");
+        Check("nes 2.0: the header names the console it was made for",
+            cartridge.Timing == ConsoleTiming.Pal, $"got {cartridge.Timing}");
+    }
+
+    {
+        // An iNES 1.0 header has none of that and must not be read as if it did.
+        Cartridge cartridge = Cartridge.FromBytes(BuildRom(1, 1, 0, 0));
+        Check("nes 2.0: an older header reports no submapper and NTSC timing",
+            !cartridge.IsNes20 && cartridge.Submapper == 0
+            && cartridge.Timing == ConsoleTiming.Ntsc && cartridge.PrgNvramSize == 0);
+    }
+}
+
 // ------------------------------------------------------------------ mapper
 
 {
