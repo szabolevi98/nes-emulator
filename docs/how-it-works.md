@@ -12,6 +12,7 @@ Writing a processor is mostly transcription. The interesting work is in the hand
 - **Page crossing costs a cycle, but only for reads.** `LDA $80FF,X` takes a fifth cycle when the index pushes it into the next page, because the processor has to correct the address it already guessed. A store takes the long path every time, so its cost never changes.
 - **Read-modify-write writes twice.** `INC $20` puts the unmodified value back before it writes the new one. On work RAM nothing notices, but some hardware registers react to the first write, and a version that optimises it away behaves differently on real games.
 - **The break flag is not a real flag.** Nothing stores it in the status register; it only exists in the copy pushed onto the stack, and its value says whether the push came from an instruction or from an interrupt.
+- **Interrupt polls have exceptions.** A taken branch within a page keeps its early poll, delaying a newly arriving IRQ or NMI until after the next instruction. An NMI can redirect a BRK/IRQ already entering its handler, but only before vector selection; a later NMI waits for the first handler instruction. The original stack frame survives a redirected vector.
 - **Decimal mode is fused off.** The 2A03 is a 6502 with binary coded decimal disabled, so `SED` sets a flag that changes nothing about how `ADC` adds.
 
 Each of those has a test that fails if the shortcut is taken instead.

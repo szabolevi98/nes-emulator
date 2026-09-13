@@ -26,10 +26,22 @@ The public `4-jitter`, `5-len_timing` and `6-irq_flag_timing` ROMs exercise both
 
 References: [APU frame counter](https://www.nesdev.org/wiki/APU_Frame_Counter), [hardware confirmation of the 3/4-cycle write delay](https://forums.nesdev.org/viewtopic.php?t=26816), and the pinned [APU test sources](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/apu_test/source).
 
+## CPU interrupt entry and branch polling
+
+The third milestone brings `cpu_interrupts_v2` from 2/5 to **5/5** and the complete suite to **51/55**, with no previous pass lost. All 2,560,000 CPU bus-cycle vectors also pass after this change.
+
+A taken branch within the same page keeps the interrupt poll from its opcode-fetch cycle. Its extra cycle does not poll again. A page-crossing branch uses the later poll, while an untaken branch keeps its ordinary two-cycle timing. This applies to both IRQ and NMI.
+
+An NMI sampled during the first four cycles of BRK or IRQ entry redirects both vector reads to the NMI vector, preserving the original return address and stacked B flag. The selection uses the sample from before the status push. A later NMI cannot change either vector byte and waits until the handler's first instruction has executed: interrupt entry does not perform an ordinary instruction-end poll.
+
+Offline tests sweep NMI assertion across all seven BRK/IRQ entry cycles, checking the bus addresses and directions, stack contents, first handler instruction and save/load at the entry boundary. Separate IRQ and NMI sweeps cover untaken, taken and page-crossing branches, with JMP as a control. These cover sustained assertions; sub-cycle pulses and the transistor-level lost-NMI window need additional coverage.
+
+References: [CPU interrupt polling](https://www.nesdev.org/wiki/Interrupts), [Visual6502 interrupt hijacking](https://www.nesdev.org/wiki/Visual6502wiki/6502_Interrupt_Hijacking), and the pinned [CPU interrupt test sources](https://github.com/christopherpow/nes-test-roms/tree/95d8f621ae55cee0d09b91519a8989ae0e64753b/cpu_interrupts_v2/source).
+
 ## Validation and save compatibility
 
-- 284 offline checks, including status/NMI reads across five adjacent dots, repeated NMI edges, odd-frame boundaries, APU reset and IRQ boundaries, and real v2/v3 state migration fixtures.
-- The complete public ROM report retains all seven failures and their messages.
+- 364 offline checks, including status/NMI reads across five adjacent dots, repeated NMI edges, CPU interrupt entry and branch polling, odd-frame boundaries, APU reset and IRQ boundaries, and real v2/v3 state migration fixtures.
+- The complete public ROM report retains all four failures and their messages.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
@@ -43,9 +55,8 @@ dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cp
 
 ## Next targets
 
-1. CPU NMI/BRK/IRQ overlap and branch interrupt polling.
-2. DMC prefetch and CPU/OAM DMA bus arbitration.
-3. MMC3 A12 fetch timing and an explicit MMC3A revision option.
-4. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
+1. DMC prefetch and CPU/OAM DMA bus arbitration.
+2. MMC3 A12 fetch timing and an explicit MMC3A revision option.
+3. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
 
 Each milestone should retain the previous passing checks and report its remaining mismatches. Sprite evaluation and DMA interactions need coverage beyond the present 55-ROM set.

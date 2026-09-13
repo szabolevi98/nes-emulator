@@ -119,6 +119,10 @@ public sealed class Cpu6502(IBus bus)
 
         long start = Cycles;
         _stepping = true;
+        bool pollInterrupts = false;
+        bool branchPoll = false;
+        bool branchIrq = false;
+        bool branchNmi = false;
 
         if (_nmiReady)
         {
@@ -134,15 +138,22 @@ public sealed class Cpu6502(IBus bus)
         {
             byte opcode = Read(PC++);
             OpcodeInfo info = OpcodeTable.Entries[opcode];
+            branchIrq = _irqSample;
+            branchNmi = _nmiSample;
             // JSR fetches the high operand byte only after pushing its return address.
             ushort address = info.Op == Op.JSR ? Read(PC++) : Resolve(info.Mode, info.PageCross);
             Execute(info.Op, info.Mode, address);
+            pollInterrupts = info.Op != Op.BRK;
+            branchPoll = info.Mode == Am.Relative && Cycles - start == 3;
         }
 
-        // Interrupts are polled on the penultimate cycle. In particular, CLI,
-        // SEI and PLP change I after their poll, whereas RTI pulls P earlier.
-        _irqReady = _previousIrqSample;
-        _nmiReady = _previousNmiSample && _nmiPending;
+        // A taken branch within a page retains its first-cycle poll; its extra
+        // cycle does not poll again. Other instructions use the penultimate
+        // cycle (before CLI/SEI/PLP change I, but after RTI pulls P).
+        // Interrupt entry itself does not poll: a late NMI waits until the
+        // handler's first instruction has executed.
+        _irqReady = pollInterrupts && (branchPoll ? branchIrq : _previousIrqSample);
+        _nmiReady = pollInterrupts && (branchPoll ? branchNmi : _previousNmiSample) && _nmiPending;
         _stepping = false;
 
         return (int)(Cycles - start);
@@ -752,9 +763,10 @@ public sealed class Cpu6502(IBus bus)
 
     private ushort ReadInterruptVector(ushort vector)
     {
-        // An NMI edge before vector fetch can hijack IRQ/BRK without changing
-        // the return address or the B bit already pushed onto the stack.
-        if (_nmiPending)
+        // Vector selection uses the NMI sample from before the status push.
+        // An edge in the first four entry cycles can hijack IRQ/BRK without
+        // changing its return address or B bit; a later edge stays pending.
+        if (_previousNmiSample && _nmiPending)
         {
             vector = NmiVector;
             _nmiPending = false;

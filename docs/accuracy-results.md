@@ -21,10 +21,10 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | cpu_dummy_writes/cpu_dummy_writes_oam.nes | PASS | Passed | 7c1d71a38b2e873d0874add8b823ff39b99151bb29f50096d8021787020c566c |
 | cpu_dummy_writes/cpu_dummy_writes_ppumem.nes | PASS | Passed | f59ac329f4872277ccbeff9dd595b901d861af8d53e8a43dcca93bb86752a6b3 |
 | cpu_interrupts_v2/rom_singles/1-cli_latency.nes | PASS | Passed | e402d36118f77dcbbe8ddca90c15fc76a46bcb30b25cb028c383e4a621de5fc0 |
-| cpu_interrupts_v2/rom_singles/2-nmi_and_brk.nes | FAIL (1) | NMI BRK 00 27 36 00 26 36 00 26 36 00 36 00 00 36 00 00 36 00 00 36 00 00 36 00 00 36 00 00 26 36 00 57FDBD98 2-nmi_and_brk Failed | 6e6bf6205930afcfebdc213c583df53986a688a8b36f8856b805ef4c1853e6eb |
-| cpu_interrupts_v2/rom_singles/3-nmi_and_irq.nes | FAIL (1) | NMI BRK 23 00 21 00 21 00 20 00 20 00 20 00 20 00 20 00 20 00 20 00 20 00 24 20 A13A6AB1 3-nmi_and_irq Failed | 3008a9524d174a8aca562ff0361eba81da53e38cf1ebb5125322fe151f14d945 |
+| cpu_interrupts_v2/rom_singles/2-nmi_and_brk.nes | PASS | Passed | 6e6bf6205930afcfebdc213c583df53986a688a8b36f8856b805ef4c1853e6eb |
+| cpu_interrupts_v2/rom_singles/3-nmi_and_irq.nes | PASS | Passed | 3008a9524d174a8aca562ff0361eba81da53e38cf1ebb5125322fe151f14d945 |
 | cpu_interrupts_v2/rom_singles/4-irq_and_dma.nes | PASS | Passed | 6d7b4c1947ada64679af56cf0c227286b2408afe1747dfaa4dc7363d57ff87f6 |
-| cpu_interrupts_v2/rom_singles/5-branch_delays_irq.nes | FAIL (1) | test_jmp T+ CK PC 00 02 04 01 01 04 02 03 07 03 02 07 04 01 07 05 02 08 06 01 08 07 03 08 08 02 08 09 01 08 test_branch_not_taken T+ CK PC 00 02 04 01 01 04 02 02 06 03 01 06 04 02 07 05 01 07 06 04 0A 07 03 0A 08 02 0A 09 01 0A test_branch_taken_pagecross T+ CK PC 00 02 0D 01 01 0D 02 04 00 03 03 00 04 02 00 05 01 00 06 04 03 07 03 03 08 02 03 09 01 03 test_branch_taken T+ CK PC 00 02 04 01 01 04 02 03 07 03 02 07 04 01 07 05 04 0A 06 03 0A 07 02 0A 08 01 0A 09 03 0A CA0FBC6A 5-branch_delays_irq Failed | f9e10b4a24d8f3cd3e51fb7457c72858aab96a6467fdbbd806d0661c2d32fdc7 |
+| cpu_interrupts_v2/rom_singles/5-branch_delays_irq.nes | PASS | Passed | f9e10b4a24d8f3cd3e51fb7457c72858aab96a6467fdbbd806d0661c2d32fdc7 |
 | cpu_reset/ram_after_reset.nes | PASS | Passed | f1802a5618aaaa0c4d592caa45b0b13c54082af93fc311bda0c27bceacbc7c7f |
 | cpu_reset/registers.nes | PASS | Passed | a30f33fb6c9f56012fba38dc85ddc3dccc06bfc0b25fef7711b63f8207279715 |
 | instr_misc/rom_singles/01-abs_x_wrap.nes | PASS | Passed | 892e892b3b5d3526913b5491252f628d987baf44509dd28a7d109efc8a16bacc |
@@ -66,4 +66,4 @@ PASS requires the ROM's `$6000` result to be zero, with the `$6001–$6003` prot
 | ppu_vbl_nmi/rom_singles/09-even_odd_frames.nes | PASS | Passed | 1ac04283021ddd9294cc74ee709c55e20a350dc4815c15a8a93b3654837e858d |
 | ppu_vbl_nmi/rom_singles/10-even_odd_timing.nes | PASS | Passed | 7217d2d172ce11ad45c4da40c2f22201cf0eb758bc2cd8dd39d2cf0a7d4ca83e |
 
-48/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.
+51/55 ROMs passed. Timeout: 3,600 emulated frames per ROM.

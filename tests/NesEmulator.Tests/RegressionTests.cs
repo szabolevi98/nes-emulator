@@ -9,6 +9,7 @@ internal static class RegressionTests
 {
     public static void Run(Action<string, bool> check)
     {
+        InterruptTiming(check);
         void BusTrace(string name, byte[] program, ushort[] reads, Action<Cpu6502, TraceBus>? setup = null)
         {
             TraceBus bus = new();
@@ -155,6 +156,91 @@ internal static class RegressionTests
             while (!ppu.FrameComplete) ppu.Step();
             check("sprites: fetch slots preserve the sprite X position", ppu.FrameBuffer[11 * 256 + 12] == 0x21
                 && ppu.FrameBuffer[11 * 256 + 11] == 0 && ppu.FrameBuffer[11 * 256 + 13] == 0);
+        }
+    }
+
+    private static void InterruptTiming(Action<string, bool> check)
+    {
+        foreach (bool brk in new[] { false, true })
+        for (int edge = 1; edge <= 7; edge++)
+        {
+            TraceBus bus = new();
+            bus.Memory[0x7FFF] = 0xEA;
+            bus.Memory[0x8000] = brk ? (byte)0x00 : (byte)0xEA;
+            bus.Memory[0xFFFA] = 0x56; bus.Memory[0xFFFB] = 0xA0;
+            bus.Memory[0xFFFE] = 0x12; bus.Memory[0xFFFF] = 0x90;
+            bus.Memory[0xA056] = bus.Memory[0x9012] = 0x38; // SEC
+            bus.Memory[0xA057] = 0x40; // RTI
+            Cpu6502 cpu = new(bus) { PC = brk ? (ushort)0x8000 : (ushort)0x7FFF, S = 0xFD, P = 0x20 };
+            if (!brk)
+            {
+                cpu.SetIrqLine(true);
+                cpu.Step(); // sample IRQ during the preceding NOP
+                cpu.SetIrqLine(false);
+            }
+            long start = cpu.Cycles;
+            cpu.NmiInput = () => cpu.Cycles - start >= edge;
+            bus.Accesses.Clear();
+            int elapsed = cpu.Step();
+            bool hijacked = edge <= 4;
+            ushort handler = hijacked ? (ushort)0xA056 : (ushort)0x9012;
+            ushort vector = hijacked ? (ushort)0xFFFA : (ushort)0xFFFE;
+            string name = $"NMI during {(brk ? "BRK" : "IRQ")} cycle {edge}";
+            check($"{name}: vector and seven bus accesses", elapsed == 7 && cpu.PC == handler &&
+                bus.Accesses.Select(a => a.Address).SequenceEqual(new ushort[]
+                { 0x8000, brk ? (ushort)0x8001 : (ushort)0x8000, 0x1FD, 0x1FC, 0x1FB, vector, (ushort)(vector + 1) }) &&
+                bus.Accesses.Select(a => a.Write).SequenceEqual(new[] { false, false, true, true, true, false, false }));
+            check($"{name}: preserves the original return address and B flag",
+                bus.Memory[0x1FD] == 0x80 && bus.Memory[0x1FC] == (brk ? 2 : 0) &&
+                bus.Memory[0x1FB] == (brk ? 0x30 : 0x20) && cpu.S == 0xFA);
+
+            // Restore at the instruction boundary with the NMI line still held.
+            using MemoryStream saved = new();
+            cpu.SaveState(new BinaryWriter(saved));
+            Cpu6502 restored = new(bus);
+            saved.Position = 0;
+            restored.LoadState(new BinaryReader(saved));
+            restored.NmiInput = () => true;
+            check($"{name}: handler executes SEC first after save/load",
+                restored.Step() == 2 && restored.PC == handler + 1 && (restored.P & Cpu6502.FlagCarry) != 0);
+            if (hijacked)
+            {
+                check($"{name}: held NMI does not trigger twice",
+                    restored.Step() == 6 && restored.PC == (brk ? 0x8002 : 0x8000) && restored.S == 0xFD);
+            }
+            else
+            {
+                check($"{name}: late NMI follows the first handler instruction",
+                    restored.Step() == 7 && restored.PC == 0xA056 &&
+                    bus.Memory[0x1FA] == 0x90 && bus.Memory[0x1F9] == 0x13 && bus.Memory[0x1F8] == 0x25);
+            }
+        }
+
+        foreach (bool nmi in new[] { false, true })
+        foreach ((string name, ushort pc, byte opcode, byte operand, int cycles, ushort target, int poll) in new[]
+        {
+            ("untaken branch", (ushort)0x8000, (byte)0xB0, (byte)0x02, 2, (ushort)0x8002, 1),
+            ("taken branch in page", (ushort)0x8000, (byte)0x90, (byte)0x02, 3, (ushort)0x8004, 1),
+            ("taken branch across page", (ushort)0x80FC, (byte)0x90, (byte)0x02, 4, (ushort)0x8100, 3),
+            ("absolute JMP", (ushort)0x8000, (byte)0x4C, (byte)0x04, 3, (ushort)0x8004, 2),
+        })
+        for (int edge = 1; edge <= cycles; edge++)
+        {
+            TraceBus bus = new();
+            bus.Memory[pc] = opcode; bus.Memory[pc + 1] = operand; bus.Memory[pc + 2] = 0x80;
+            bus.Memory[target] = 0xE8; // INX makes a deferred interrupt observable
+            bus.Memory[0xFFFB] = 0xA0; bus.Memory[0xFFFF] = 0x90;
+            Cpu6502 cpu = new(bus) { PC = pc, S = 0xFD, P = 0x20 };
+            cpu.NmiInput = () => nmi && cpu.Cycles >= edge;
+            cpu.OnCycleComplete = () => { if (!nmi && cpu.Cycles >= edge) cpu.SetIrqLine(true); };
+            int elapsed = cpu.Step();
+            bool immediate = edge <= poll;
+            int next = cpu.Step();
+            ushort handler = nmi ? (ushort)0xA000 : (ushort)0x9000;
+            bool matches = elapsed == cycles && (immediate
+                ? next == 7 && cpu.PC == handler && cpu.X == 0
+                : next == 2 && cpu.PC == target + 1 && cpu.X == 1 && cpu.Step() == 7 && cpu.PC == handler);
+            check($"{name}: {(nmi ? "NMI" : "IRQ")} asserted on cycle {edge}", matches);
         }
     }
 
