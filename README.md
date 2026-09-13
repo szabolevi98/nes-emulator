@@ -98,6 +98,10 @@ The second command runs the whole collection. It takes the page list, test order
 
 ## Running it
 
+[**Download the latest build**](https://github.com/szabolevi98/nes-emulator/releases/latest) — one Windows x64 file with nothing to install, not even .NET. It is not code-signed, so Windows warns the first time it runs: **More info → Run anyway**.
+
+Or from source:
+
 ```
 dotnet build NesEmulator.sln
 dotnet run --project src/NesEmulator
@@ -130,7 +134,7 @@ For a copy that runs on a machine with no .NET installed:
 dotnet publish src/NesEmulator/NesEmulator.csproj -p:PublishProfile=win-x64-single-file
 ```
 
-That leaves one 49 MB `publish/NesEmulator.exe`, which also accepts a cartridge path on the command line. Building needs the .NET 9 SDK; the shell needs Windows, while the core targets plain `net9.0` and has no platform dependencies.
+That leaves one 49 MB `publish/NesEmulator.exe`, which is the same file the releases carry and also accepts a cartridge path on the command line. Building needs the .NET 9 SDK; the shell needs Windows, while the core targets plain `net9.0` and has no platform dependencies.
 
 **No commercial ROMs are included and none will be.** Anything dropped into `roms/` stays out of version control apart from the demo cartridge.
 
