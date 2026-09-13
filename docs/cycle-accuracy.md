@@ -50,24 +50,39 @@ Offline bus traces distinguish address changes from CHR reads. Whole-frame check
 
 References: [PPU rendering](https://www.nesdev.org/wiki/PPU_rendering), [hardware explanation of the aborted fetch and MMC3](https://forums.nesdev.org/viewtopic.php?t=25255), and the pinned [scanline timing test](https://github.com/christopherpow/nes-test-roms/blob/95d8f621ae55cee0d09b91519a8989ae0e64753b/mmc3_test_2/source/4-scanline_timing.s).
 
+## DMC prefetch and shared DMA arbitration
+
+The fifth milestone makes `apu_test/7-dmc_basics` pass: **8/8 APU ROMs**, **53/55 baseline ROMs**, and **2/2 additional DMA ROMs**. The separate `--dma-suite` runs both `sprdma_and_dmc_dma` ROMs, which check transfer duration and OAM contents across collisions. The original baseline keeps its 55-ROM denominator.
+
+The DMC memory reader fills a one-byte buffer independently of the output shifter. Fetching the final byte updates active/IRQ status or restarts the loop immediately; the buffered byte and current output bits remain playable after disabling the reader. Sample addresses wrap from `$FFFF` to `$8000`.
+
+DMA now holds the CPU at its next eligible read, including reads inside an instruction. Writes continue until a read permits the halt. Initial DMC loads wait for the second following GET phase; later reloads request a PUT halt. Halt, dummy, alignment and transfer cycles all clock the CPU, APU and PPU. DMC reads win over OAM reads, while preparation cycles overlap the ongoing OAM transfer. An instruction's own bus-cycle count remains separate from stolen cycles so a stalled branch keeps its early interrupt poll.
+
+On the selected NES-001 model, contiguous halted controller reads keep /OE asserted and clock the pad once. Standard pads now shift in ones after their eight buttons. The older `dmc_dma_during_read4/dma_4016_read` ROM has no `$6000` result protocol, so it is not included in the automated table; a local run's nametable text reports `08 08 07 08 08` and `Passed`, matching its source. Reset cancels pending DMA requests and preserves the underlying clock phase.
+
+The offline checks cover load alignment, consecutive CPU writes, OAM byte order, controller reads, buffer retention, address wrap, an IRQ arriving during a stalled branch, reset, and deterministic saves with pending or active DMC playback. DMA completes synchronously inside a CPU read, so public instruction-boundary saves need the pending request and channel state, not a partially executed arbitration loop.
+
+References: [DMC reader and output behavior](https://www.slack.net/~ant/nes-emu/dmc/), [DMA cycles and collisions](https://www.nesdev.org/wiki/DMA), and [hardware OAM/DMC test results](https://forums.nesdev.org/viewtopic.php?t=6100).
+
 ## Validation and save compatibility
 
-- 382 offline checks, including status/NMI reads across five adjacent dots, repeated NMI edges, CPU interrupt entry and branch polling, odd-frame and PPU bus boundaries, APU reset and IRQ boundaries, and real v2/v3 state migration fixtures.
-- The complete public ROM report retains all three failures and their messages.
+- 415 offline checks, including CPU/PPU/APU timing, DMA arbitration and real v2/v3/v4 state migration fixtures.
+- The complete baseline ROM report retains both failures and their messages; DMA results are reported separately.
 - The independent CPU vector suite checks registers, memory and every bus operation for all 256 opcodes.
 - Local Mega Man 4 and Super Mario Bros. 3 runs exercise game input, rendering and audio; their ROMs and generated captures remain outside version control.
 
-New saves use format v4 to preserve the pending APU reset delay as well as the CPU/PPU timing latches introduced in v3. Existing v2 and v3 saves remain loadable, with no pending APU reset. For v2, migration seeds the CPU's sampled NMI level from the restored PPU and transfers any old pending PPU event, avoiding a duplicate NMI from a held line or loss of an unconsumed event.
+New saves use format v5, adding the DMC buffer, pending DMA delay and GET/PUT phase to the v4 APU reset delay and v3 CPU/PPU timing latches. Existing v2/v3/v4 saves remain loadable. Older DMC states retain their output shifter and unread sample address, start with an empty prefetch buffer, and schedule a fetch if the reader is active. v2/v3 states have no pending APU reset. For v2, migration also seeds the CPU's sampled NMI level and transfers any pending PPU NMI event.
 
 ```powershell
 dotnet run -c Release --project tests/NesEmulator.Tests
 dotnet run -c Release --project tests/NesEmulator.Tests -- --rom-suite roms/accuracy docs/accuracy-results.md
+dotnet run -c Release --project tests/NesEmulator.Tests -- --dma-suite roms/accuracy docs/dma-results.md
 dotnet run -c Release --project tests/NesEmulator.Tests -- --cpu-vectors roms/cpu-vectors
 ```
 
 ## Next targets
 
-1. DMC prefetch and CPU/OAM DMA bus arbitration.
+1. Remaining DMA quirks: stop/abort windows, hybrid `$4000–$401F` register selection during DMA, and adjacent PPUDATA-read behavior. These are not established by the current passing suites.
 2. An explicit MMC3A revision option and exact M2-phase filtering of A12.
 3. Per-dot sprite evaluation and the hardware overflow behavior, with additional public suites.
 

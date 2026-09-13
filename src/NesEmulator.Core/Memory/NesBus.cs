@@ -46,26 +46,81 @@ public sealed class NesBus(
     /// can replace this page before the processor reaches the next read cycle.
     /// </summary>
     private int _dmaPage = -1;
+    // Transient while RunDma owns the bus. On NES-001, a controller's /OE stays
+    // asserted across contiguous stalled reads, so those reads clock it once.
+    private bool _dmaActive;
+    private ushort _dmaControllerAddress;
+    private byte _dmaControllerValue;
 
-    public int RunDma(Cpu6502 cpu)
+    public int RunDma(Cpu6502 cpu) => RunDma(cpu, cpu.PC);
+
+    internal void CancelDma() => _dmaPage = -1;
+
+    internal int RunDma(Cpu6502 cpu, ushort haltedAddress)
     {
-        if (_dmaPage < 0) return 0;
+        if (_dmaPage < 0 && !_apu.Dmc.DmaPending) return 0;
         int page = _dmaPage;
         _dmaPage = -1;
         long start = cpu.Cycles;
-        bool align = (start & 1) != 0;
-        cpu.DmaRead(cpu.PC); // halt cycle
-        if (align) cpu.DmaRead(cpu.PC);
-        for (int i = 0; i < 256; i++)
+        bool halt = true;
+        bool oam = page >= 0;
+        bool oamByteReady = false;
+        byte oamByte = 0;
+        int offset = 0;
+        int dmcStage = 0; // 0: inactive, 1: dummy, 2: waiting for GET
+        _dmaActive = true;
+        try
         {
-            byte value = cpu.DmaRead((ushort)((page << 8) | i));
-            cpu.DmaWrite(0x2004, value);
+            while (oam || dmcStage != 0 || _apu.Dmc.DmaPending)
+            {
+                bool get = _apu.Dmc.NextCycleIsGet;
+                bool dmcHalt = dmcStage == 0 && _apu.Dmc.DmaPending;
+                int previousStage = dmcStage;
+                if (halt)
+                {
+                    cpu.DmaRead(haltedAddress);
+                }
+                else if (dmcStage == 2 && get)
+                {
+                    // The DMC owns this GET. OAM must realign before its next read.
+                    cpu.DmaRead(_apu.Dmc.DmaAddress, _apu.Dmc.CompleteDma);
+                    dmcStage = 0;
+                }
+                else if (oam && get)
+                {
+                    oamByte = cpu.DmaRead((ushort)((page << 8) | offset));
+                    oamByteReady = true;
+                }
+                else if (oam && oamByteReady)
+                {
+                    cpu.DmaWrite(0x2004, oamByte);
+                    oamByteReady = false;
+                    oam = ++offset < 256;
+                }
+                else
+                {
+                    cpu.DmaRead(haltedAddress);
+                }
+
+                // DMC halt/dummy/alignment cycles can overlap OAM reads and writes.
+                if (dmcHalt) dmcStage = 1;
+                else if (previousStage == 1) dmcStage = 2;
+                halt = false;
+            }
+        }
+        finally
+        {
+            _dmaActive = false;
+            _dmaControllerAddress = 0;
         }
         return (int)(cpu.Cycles - start);
     }
 
     public byte Read(ushort address)
     {
+        if (_dmaActive && _dmaControllerAddress != 0 && address == _dmaControllerAddress)
+            return _openBus = _dmaControllerValue;
+        _dmaControllerAddress = 0;
         byte value;
 
         if (address < 0x2000)
@@ -98,11 +153,17 @@ public sealed class NesBus(
         }
 
         _openBus = value;
+        if (_dmaActive && address is 0x4016 or 0x4017)
+        {
+            _dmaControllerAddress = address;
+            _dmaControllerValue = value;
+        }
         return value;
     }
 
     public void Write(ushort address, byte value)
     {
+        _dmaControllerAddress = 0;
         _openBus = value;
 
         if (address < 0x2000)

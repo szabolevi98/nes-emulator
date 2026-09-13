@@ -56,6 +56,7 @@ public sealed class Cpu6502(IBus bus)
     private bool _lastNmiLine;
     private bool _stepping;
     private byte _jamPhase;
+    private int _instructionCycles;
 
     /// <summary>
     /// The address an indexed mode started from, before the index was added.
@@ -107,17 +108,21 @@ public sealed class Cpu6502(IBus bus)
     /// <summary>Logical assertion of the NMI input, sampled after the bus access.</summary>
     public Func<bool>? NmiInput { get; set; }
 
+    /// <summary>Lets DMA hold an upcoming CPU read; CPU writes cannot be halted.</summary>
+    public Action<ushort>? BeforeRead { get; set; }
+
     /// <summary>Runs one instruction, or services a pending interrupt. Returns the cycles it cost.</summary>
     public int Step()
     {
+        long start = Cycles;
         if (Jammed)
         {
             Read(_jamPhase is 1 or 2 ? (ushort)0xFFFE : (ushort)0xFFFF);
             if (_jamPhase < 3) _jamPhase++;
-            return 1;
+            return (int)(Cycles - start);
         }
 
-        long start = Cycles;
+        _instructionCycles = 0;
         _stepping = true;
         bool pollInterrupts = false;
         bool branchPoll = false;
@@ -144,7 +149,7 @@ public sealed class Cpu6502(IBus bus)
             ushort address = info.Op == Op.JSR ? Read(PC++) : Resolve(info.Mode, info.PageCross);
             Execute(info.Op, info.Mode, address);
             pollInterrupts = info.Op != Op.BRK;
-            branchPoll = info.Mode == Am.Relative && Cycles - start == 3;
+            branchPoll = info.Mode == Am.Relative && _instructionCycles == 3;
         }
 
         // A taken branch within a page retains its first-cycle poll; its extra
@@ -180,13 +185,27 @@ public sealed class Cpu6502(IBus bus)
 
     private byte Read(ushort address)
     {
+        BeforeRead?.Invoke(address);
+        _instructionCycles++;
+        return DmaRead(address);
+    }
+
+    internal byte DmaRead(ushort address, Action<byte>? completed = null)
+    {
         ConsumeTick();
         byte value = _bus.Read(address);
+        completed?.Invoke(value);
         CompleteTick();
         return value;
     }
 
     private void Write(ushort address, byte value)
+    {
+        _instructionCycles++;
+        DmaWrite(address, value);
+    }
+
+    internal void DmaWrite(ushort address, byte value)
     {
         ConsumeTick();
         _bus.Write(address, value);
@@ -774,10 +793,6 @@ public sealed class Cpu6502(IBus bus)
         }
         return Read16(vector);
     }
-
-    // DMA also owns real bus cycles, with all chips continuing to tick.
-    internal byte DmaRead(ushort address) => Read(address);
-    internal void DmaWrite(ushort address, byte value) => Write(address, value);
 
     private void Push(byte value)
     {

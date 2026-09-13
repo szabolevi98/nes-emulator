@@ -47,7 +47,8 @@ public sealed class Controller
         }
 
         byte bit = (byte)(_shiftRegister & 0x01);
-        _shiftRegister >>= 1;
+        // A standard pad shifts in ones after its eight buttons are exhausted.
+        _shiftRegister = (byte)((_shiftRegister >> 1) | 0x80);
 
         // The upper bits are not driven; the wires keep the last value the bus had,
         // which on this console reads back as $40.

@@ -72,7 +72,7 @@ internal static class RegressionTests
         foreach (int parity in new[] { 0, 1 })
         {
             Nes nes = MakeNes();
-            nes.Cpu.Cycles = parity;
+            if ((nes.Cpu.Cycles & 1) != parity) nes.Cpu.DmaRead(nes.Cpu.PC);
             nes.Bus.Write(0x0200, 0x42);
             nes.Ppu.WriteRegister(0x2003, 0x80);
             nes.Bus.Write(0x4014, 2);

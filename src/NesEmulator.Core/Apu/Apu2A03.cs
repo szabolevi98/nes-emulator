@@ -74,7 +74,7 @@ public sealed class Apu2A03
 
     public void Reset()
     {
-        _cycle = 0;
+        // Reset does not restart the underlying GET/PUT clock phase.
         _frameCounter = 0;
         _frameResetDelay = 0;
         _frameIrqPending = false;
@@ -379,13 +379,13 @@ public sealed class Apu2A03
         writer.Write(_frameResetDelay);
     }
 
-    internal void LoadState(BinaryReader reader, bool legacy = false)
+    internal void LoadState(BinaryReader reader, bool legacy = false, bool legacyDmc = false)
     {
         Pulse1.LoadState(reader);
         Pulse2.LoadState(reader);
         Triangle.LoadState(reader);
         Noise.LoadState(reader);
-        Dmc.LoadState(reader);
+        Dmc.LoadState(reader, legacyDmc);
         _cycle = reader.ReadInt64();
         _frameCounter = reader.ReadInt32();
         _fiveStepMode = reader.ReadBoolean();
@@ -393,6 +393,7 @@ public sealed class Apu2A03
         _frameIrqPending = reader.ReadBoolean();
         _sampleCounter = reader.ReadDouble();
         _frameResetDelay = legacy ? 0 : reader.ReadInt32();
+        if (legacyDmc) Dmc.RestoreLegacyDmaPhase(_cycle);
 
         // Samples already queued belong to the moment that was left behind.
         DiscardSamples();

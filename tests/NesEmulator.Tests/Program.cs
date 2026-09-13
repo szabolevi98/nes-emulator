@@ -1001,12 +1001,15 @@ foreach ((string fixture, int expectedCount) in new[]
 {
     ("v2-held-nmi.state.gz", 1), ("v2-pending-nmi.state.gz", 2),
     ("v3-held-nmi.state.gz", 1),
+    ("v4-active-dmc.state.gz", 1),
 })
 {
     using Stream resource = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream(fixture)!;
     using System.IO.Compression.GZipStream compressed = new(resource, System.IO.Compression.CompressionMode.Decompress);
     Nes nes = new(Cartridge.FromBytes(BuildNmiTimingRom()));
     nes.LoadState(compressed);
+    if (fixture == "v4-active-dmc.state.gz")
+        Check("state: v4 DMC reader resumes at the unfetched sample address", nes.Apu.Dmc.Active && nes.Apu.Dmc.DmaAddress == 0xC000);
     for (int i = 0; i < 20; i++) nes.StepInstruction();
     Check($"state: migrates {fixture}", nes.Bus.Read(0x10) == expectedCount && nes.Cpu.PC == 0xC003,
         $"NMI count {nes.Bus.Read(0x10)}, PC {nes.Cpu.PC:X4}");
@@ -1107,6 +1110,8 @@ foreach ((string fixture, int expectedCount) in new[]
 
     nes.StepInstruction(); // LDA
     int cycles = nes.StepInstruction(); // STA, which triggers the transfer
+    Check("dma: the initiating write finishes before the CPU is halted", cycles == 4);
+    cycles = nes.StepInstruction(); // the JMP's opcode read is held by DMA
 
     Check("dma: the processor is held still for the transfer", cycles >= 513,
         $"got {cycles}");
@@ -1641,7 +1646,9 @@ foreach (int phase in new[] { 0, 1 })
     dmc.WriteControl(0x4F); // loop one byte; each bit alternates its output level
     dmc.WriteLength(0);
     dmc.SetEnabled(true);
-    dmc.Clock(); // load the first byte
+    // The memory buffer is filled before the output unit reaches its next
+    // eight-bit boundary; wait for the first audible bit before checking gaps.
+    for (int i = 0; i < 1000 && dmc.Output() == 0; i++) dmc.Clock();
     bool continuous = true;
     for (int bit = 0; bit < 32; bit++)
     {
@@ -1876,6 +1883,7 @@ byte[] BuildBusyRom()
 // ------------------------------------------------------------------ summary
 
 RegressionTests.Run((name, pass) => Check(name, pass));
+DmaTests.Run((name, pass) => Check(name, pass));
 
 Console.WriteLine();
 Console.WriteLine($"{total - failures}/{total} passed");

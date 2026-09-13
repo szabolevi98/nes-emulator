@@ -35,6 +35,8 @@ Five channels — two square waves, a triangle, a noise generator and a sample p
 
 The rest of the chip divides cleanly in two. The channel timers run off the processor clock and produce the waveform; a separate frame counter ticks four or five times a frame and clocks the parts that shape a note over time — the volume envelopes, the pitch sweeps and the length counters that keep a sound playing after the game has moved on. That counter is also the only interrupt a game can get without a cartridge that provides its own.
 
+The DMC reads a byte ahead into a buffer, independently of the eight-bit shifter producing sound. Its reader halts the CPU at an eligible read cycle and shares the bus with OAM DMA: DMC fetches take priority, while halt and alignment cycles can overlap sprite transfers. Finishing the memory reader can raise an IRQ before the last buffered sound has played. Disabling the reader leaves those buffered bits intact.
+
 Two details carry more of the console's character than their size suggests. The triangle steps through a fixed thirty-two step staircase with no volume control at all, which is where that hollow bass tone comes from. And the noise channel is a shift register feeding back on itself; flipping one bit changes which bit it taps, shortening the cycle from 32,767 steps to 93 — short enough to hear as a pitch, which is how the same channel gives both hissing static and metallic engine sounds.
 
 Playback goes out through the Windows wave API, and the number of buffers the sound card has finished with is what paces the emulator. Timing the frames off a clock instead would drift against the card and break the audio up. The signal is band limited before it is decimated to the output rate; [audio implementation and validation](audio-quality.md) covers that path and how it is checked.
@@ -45,7 +47,7 @@ A save state is everything that can change while a game runs — work RAM, the p
 
 That is still too much to keep once a frame, so rewind takes a snapshot every tenth frame and deflates it. A console's memory is mostly repeated bytes and long runs of zero, so they come down to around five kilobytes each: three hundred and sixty of them, a minute of play, costs under two megabytes. Holding backspace walks back through them.
 
-State format v4 carries the mapper number, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. It stores the CPU's sampled NMI input, the PPU's suppression and render-enable latches, and the APU's pending frame-counter reset, as well as the CPU interrupt samples and mapper address-edge state. Existing v2/v3 saves are migrated when loaded, including an unconsumed PPU NMI event from v2; v1 remains unsupported.
+State format v5 carries the mapper number, a SHA-256 identity of the original ROM image, the payload size and its SHA-256 checksum. A different ROM is refused even if it uses the same mapper. Truncated or corrupted payloads are rejected before any live console state changes. Along with the CPU/PPU/APU timing latches, it stores the DMC prefetch buffer, DMA request delay and GET/PUT phase. Existing v2/v3/v4 saves are migrated when loaded, including an unconsumed PPU NMI event from v2 and an active DMC reader from older formats; v1 remains unsupported.
 
 ## Running it from a debugger
 

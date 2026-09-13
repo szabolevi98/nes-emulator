@@ -24,16 +24,20 @@ public sealed class DmcChannel
     private bool _irqEnabled;
     private bool _loop;
 
-    private ushort _sampleAddress;
-    private int _sampleLength;
+    private ushort _sampleAddress = 0xC000;
+    private int _sampleLength = 1;
     private ushort _currentAddress;
     private int _bytesRemaining;
 
     private byte _shiftRegister;
     private int _bitsRemaining;
     private bool _silence = true;
+    private byte _sampleBuffer;
+    private bool _bufferEmpty = true;
+    private int _dmaDelay = -1;
+    private bool _getCycle = true;
 
-    /// <summary>Reads cartridge memory. Supplied by the console once its bus exists.</summary>
+    /// <summary>Optional reader for standalone channel tests. The console uses DMA instead.</summary>
     public Func<ushort, byte>? ReadMemory { get; set; }
 
     public int OutputLevel { get; private set; }
@@ -41,6 +45,10 @@ public sealed class DmcChannel
     public bool IrqPending { get; private set; }
 
     public bool Active => _bytesRemaining > 0;
+
+    internal bool DmaPending => Active && _bufferEmpty && _dmaDelay is >= 0 and <= 1;
+    internal bool NextCycleIsGet => !_getCycle;
+    internal ushort DmaAddress => _currentAddress;
 
     public void WriteControl(byte value)
     {
@@ -66,12 +74,14 @@ public sealed class DmcChannel
         if (!enabled)
         {
             _bytesRemaining = 0;
+            _dmaDelay = -1;
             return;
         }
 
         if (_bytesRemaining == 0)
         {
             Restart();
+            if (_bufferEmpty) _dmaDelay = _getCycle ? 4 : 3;
         }
     }
 
@@ -85,6 +95,11 @@ public sealed class DmcChannel
 
     public void Clock()
     {
+        _getCycle = !_getCycle;
+        if (_dmaDelay > 0) _dmaDelay--;
+        if (_dmaDelay == 0 && ReadMemory is not null && Active && _bufferEmpty)
+            CompleteDma(ReadMemory(_currentAddress));
+
         if (_timer > 0)
         {
             _timer--;
@@ -118,19 +133,21 @@ public sealed class DmcChannel
         }
 
         _bitsRemaining = 8;
-        FillBuffer();
+        _silence = _bufferEmpty;
+        if (!_bufferEmpty)
+        {
+            _shiftRegister = _sampleBuffer;
+            _bufferEmpty = true;
+            // Reload DMAs attempt to halt on the next PUT cycle.
+            if (Active) _dmaDelay = _getCycle ? 1 : 2;
+        }
     }
 
-    private void FillBuffer()
+    internal void CompleteDma(byte value)
     {
-        if (_bytesRemaining == 0)
-        {
-            _silence = true;
-            return;
-        }
-
-        _silence = false;
-        _shiftRegister = ReadMemory?.Invoke(_currentAddress) ?? 0;
+        _sampleBuffer = value;
+        _bufferEmpty = false;
+        _dmaDelay = -1;
 
         // Sample memory is the top half of the address space and wraps within it.
         _currentAddress = _currentAddress == 0xFFFF ? (ushort)0x8000 : (ushort)(_currentAddress + 1);
@@ -162,9 +179,13 @@ public sealed class DmcChannel
         writer.Write(_silence);
         writer.Write(OutputLevel);
         writer.Write(IrqPending);
+        writer.Write(_sampleBuffer);
+        writer.Write(_bufferEmpty);
+        writer.Write(_dmaDelay);
+        writer.Write(_getCycle);
     }
 
-    internal void LoadState(BinaryReader reader)
+    internal void LoadState(BinaryReader reader, bool legacy = false)
     {
         _timer = reader.ReadInt32();
         _timerPeriod = reader.ReadInt32();
@@ -179,5 +200,15 @@ public sealed class DmcChannel
         _silence = reader.ReadBoolean();
         OutputLevel = reader.ReadInt32();
         IrqPending = reader.ReadBoolean();
+        _sampleBuffer = legacy ? (byte)0 : reader.ReadByte();
+        _bufferEmpty = legacy || reader.ReadBoolean();
+        _dmaDelay = legacy ? -1 : reader.ReadInt32();
+        _getCycle = legacy || reader.ReadBoolean();
+    }
+
+    internal void RestoreLegacyDmaPhase(long cycle)
+    {
+        _getCycle = (cycle & 1) == 0;
+        if (Active) _dmaDelay = _getCycle ? 1 : 2;
     }
 }

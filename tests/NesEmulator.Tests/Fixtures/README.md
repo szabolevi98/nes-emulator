@@ -19,3 +19,8 @@ serializer, including held-line and unconsumed-event behavior.
 `v3-held-nmi.state.gz` was written by the core from commit `7f989e2` using the
 same held-line procedure. It checks that the CPU/PPU timing latches survive
 migration while the newly added APU reset delay defaults to zero.
+
+`v4-active-dmc.state.gz` was written by the core from commit `24b552a` using
+the same held-NMI procedure, then writing `$4010=$0F`, `$4012=0`, `$4013=1`
+and `$4015=$10` without executing another CPU cycle. It checks migration of an
+active DMC reader before its first fetch, including the original sample address.

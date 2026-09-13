@@ -23,24 +23,25 @@ How the interesting parts work, and which hardware quirks had to be reproduced r
 
 ## Accuracy
 
-Two things are measured here. One is a suite of 382 offline checks. The other is the public test ROMs, which probe cycle-exact edges rather than just checking whether games run. They provide a reproducible measure of timing accuracy for specific hardware behavior. The full vblank/NMI and CPU interrupt suites, and all six APU frame-counter tests, now pass.
+Two things are measured here. One is a suite of 415 offline checks. The other is the public test ROMs, which probe cycle-exact edges rather than just checking whether games run. They provide a reproducible measure of timing accuracy for specific hardware behavior. The full vblank/NMI, CPU interrupt and APU suites now pass.
 
 | Measure | Passed | What it covers |
 |---|---:|---|
 | **CPU bus-cycle vectors** | **2,560,000 / 2,560,000** | Every one of the 256 opcodes: registers, memory, cycle counts, and each bus address, value and direction |
 | **Processor behaviour and instruction timing** | **25 / 26** | Instruction behaviour, timing, page wrapping, dummy reads and writes, reset |
 | Interrupt and video edge timing | 20 / 21 | NMI/BRK/IRQ overlap, vblank suppression, MMC3 scanline timing |
-| Sound unit timing | 7 / 8 | Frame-counter sequencing and the DMC prefetch buffer |
-| **Public ROM total** | **52 / 55** | |
+| Sound unit timing | 8 / 8 | Frame-counter sequencing and the DMC prefetch buffer |
+| **Public ROM total** | **53 / 55** | |
+| Additional DMA suite | 2 / 2 | DMC/OAM collisions, transfer length and copied sprite data |
 
-Of the three remaining failures, one wants the DMC prefetch buffer, one exercises the alternate MMC3A board revision, and one is a deliberate disagreement: for the unstable `$AB` opcode this emulator follows the `$EE` mask used by the [SingleStepTests vectors](https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502), while blargg's ROM assumes a different result. The discrepancy is reported rather than hidden by skipping the opcode.
+Of the two remaining baseline failures, one exercises the alternate MMC3A board revision, and one is a deliberate disagreement: for the unstable `$AB` opcode this emulator follows the `$EE` mask used by the [SingleStepTests vectors](https://github.com/SingleStepTests/65x02/tree/2f6980a2d95757486c7bee24355c360e40e2a224/nes6502), while blargg's ROM assumes a different result. The discrepancy is reported rather than hidden by skipping the opcode. Further DMA edge cases and per-dot sprite evaluation remain beyond these suites; the separate [DMA report](docs/dma-results.md) keeps the original 55-ROM denominator stable.
 
 Every result, failure message and ROM checksum is in the [full report](docs/accuracy-results.md), and the per-opcode vector results in the [CPU vector report](docs/cpu-vector-results.txt). Measured on Windows x64 with .NET 9 on 2026-09-13. The [cycle-accuracy work log](docs/cycle-accuracy.md) records the clock model, completed checks and next targets.
 
 ## Tests
 
 ```
-dotnet run --project tests/NesEmulator.Tests      # 382 offline checks
+dotnet run --project tests/NesEmulator.Tests      # 415 offline checks
 dotnet run --project tests/NesEmulator.UiTests    # 80 keyboard and focus checks
 ```
 
@@ -53,7 +54,7 @@ PASS  render: the leftmost squares are clipped away
 PASS  mmc3: the interrupt arrives on the counted line
 PASS  state: replaying from a state is deterministic
 ...
-382/382 passed
+415/415 passed
 ```
 
 They cover the opcode table, every addressing mode, the signed overflow cases, branch and interrupt timing, all five mappers, the picture unit registers and mirroring, the sound unit down to its envelopes, the save state round trip and the rewind ring — and, end to end, a small program that writes a palette and a name table and is then checked pixel by pixel against what came out. Nothing is downloaded.
@@ -63,6 +64,7 @@ To reproduce the public ROM runs, fetch the pinned test data first:
 ```powershell
 ./tools/fetch-accuracy-tests.ps1
 dotnet run -c Release --project tests/NesEmulator.Tests -- --rom-suite roms/accuracy docs/accuracy-results.md
+dotnet run -c Release --project tests/NesEmulator.Tests -- --dma-suite roms/accuracy docs/dma-results.md
 ```
 
 The bus-cycle vectors are an optional download of roughly 1 GB:
