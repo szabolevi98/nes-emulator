@@ -140,7 +140,7 @@ That leaves one 49 MB `publish/NesEmulator.exe`, which also accepts a cartridge 
   - `Cpu/` — the opcode table, the processor and the disassembler
   - `Ppu/` — the picture unit and the colour table
   - `Apu/` — the sound unit, its five channels and the resampler
-  - `Cartridges/` — iNES parsing and the mappers
+  - `Cartridges/` — iNES and NES 2.0 parsing, and the mappers
   - `Memory/` · `Input/` · `RewindBuffer.cs`
 - `src/NesEmulator/` — the Windows Forms shell and the wave output
 - `tests/` — the console test runner and the Windows input checks
