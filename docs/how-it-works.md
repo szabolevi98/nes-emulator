@@ -56,6 +56,18 @@ Two details carry more of the console's character than their size suggests. The 
 
 Playback goes out through the Windows wave API, and the number of buffers the sound card has finished with is what paces the emulator. Timing the frames off a clock instead would drift against the card and break the audio up. The signal is band limited before it is decimated to the output rate; [audio implementation and validation](audio-quality.md) covers that path and how it is checked.
 
+## A chip that is not listening yet
+
+A reset does not make the picture unit usable straight away. For about a frame
+afterwards it ignores the four registers that steer it — control, mask, scroll
+and address — while sprite memory and the data port answer normally throughout.
+This is why games written for the hardware wait for two vertical blanks before
+touching anything: they are waiting for the chip to start listening.
+
+Power-on is modelled as a settled chip rather than a warming one, so a freshly
+constructed console accepts those registers immediately. That keeps test rigs
+short; a reset goes through the real wait.
+
 ## One data line, and the writes that do not count
 
 The MMC1 has a single data line, so a game cannot hand it a bank number: it

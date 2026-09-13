@@ -94,9 +94,16 @@ internal static class Mmc3M2Tests
             Low(reset);
             before = reset.Ppu.Clock;
             reset.Reset();
+            long spentOnReset = reset.Ppu.Clock - before;
+
+            // The picture unit ignores $2006 until the reset has settled, so the
+            // address line cannot be driven from the processor before then.
+            // Rendering is off meanwhile, so nothing else moves A12 either.
+            while (reset.Ppu.WarmingUp) reset.StepInstruction();
+
             High(reset);
             check($"MMC3 {revision}: reset advances M2 without restarting elapsed PPU time",
-                reset.Mapper.IrqPending && reset.Ppu.Clock - before == 21);
+                reset.Mapper.IrqPending && spentOnReset == 21);
 
             string fixture = $"v6-mmc3-{revision.ToString().ToLowerInvariant()}-low.state.gz";
             using Stream resource = typeof(Mmc3M2Tests).Assembly.GetManifestResourceStream(fixture)!;

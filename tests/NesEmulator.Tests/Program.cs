@@ -1378,6 +1378,35 @@ foreach ((string fixture, int expectedCount) in new[]
 }
 
 {
+    // A reset leaves the picture unit unable to accept the registers that steer
+    // it until it has settled, about a frame later.
+    Nes nes = new(Cartridge.FromBytes(BuildRom(2, 1)));
+    void AtVblank() { while (nes.Ppu.Scanline != 241 || nes.Ppu.Cycle != 2) nes.Ppu.Step(); }
+
+    nes.Reset();
+    Check("reset: the picture unit starts out not listening", nes.Ppu.WarmingUp);
+
+    nes.Ppu.WriteRegister(0x2000, 0x80);   // ask for the vertical blank interrupt
+    AtVblank();
+    Check("reset: a control write before it settles is dropped", !nes.Ppu.NmiLine);
+
+    while (nes.Ppu.WarmingUp) nes.Ppu.Step();
+    nes.Ppu.WriteRegister(0x2000, 0x80);
+    AtVblank();
+    Check("reset: the same write lands once it has settled", nes.Ppu.NmiLine);
+
+    // Sprite memory and the data port are wired straight through, so they answer
+    // throughout. Only the four steering registers wait.
+    nes.Reset();
+    nes.Ppu.WriteRegister(0x2003, 0x05);
+    nes.Ppu.WriteRegister(0x2004, 0xAB);
+    nes.Ppu.WriteRegister(0x2003, 0x05);
+    Check("reset: sprite memory is reachable while it settles",
+        nes.Ppu.WarmingUp && nes.Ppu.ReadRegister(0x2004) == 0xAB,
+        $"got {nes.Ppu.ReadRegister(0x2004):X2}");
+}
+
+{
     // The line counter: load three, and the interrupt arrives on the fourth line,
     // because the first one is spent reloading.
     IMapper mapper = IMapper.Create(Cartridge.FromBytes(BuildRom(2, 1, 0x40)));

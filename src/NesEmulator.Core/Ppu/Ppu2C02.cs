@@ -80,6 +80,17 @@ public sealed class Ppu2C02
     private byte _copyRemaining, _overflowRemaining;
     private bool _evalDone, _nextSpriteZero;
 
+    /// <summary>
+    /// A reset leaves the picture unit unable to accept the four registers that
+    /// steer it until it has settled, about a frame later. Games written for the
+    /// hardware wait for two vertical blanks before touching them for exactly
+    /// this reason; one that does not would otherwise appear to configure a chip
+    /// that was not listening. Sprite memory and the data port are unaffected.
+    /// </summary>
+    private long _warmUpUntil;
+
+    private const long WarmUpDots = 29658 * 3;
+
     private bool _oddFrame;
     private bool _suppressVblank;
     private bool _renderingAtPreviousDot;
@@ -138,7 +149,11 @@ public sealed class Ppu2C02
         _lineSpriteCount = 0;
         BeginSpriteEvaluation();
         Array.Clear(FrameBuffer);
+        _warmUpUntil = _clock + WarmUpDots;
     }
+
+    /// <summary>Whether the steering registers are still being ignored after a reset.</summary>
+    internal bool WarmingUp => _clock < _warmUpUntil;
 
     /// <summary>Asserted while both the vblank flag and PPUCTRL's NMI enable are set.</summary>
     public bool NmiLine => (_status & _ctrl & 0x80) != 0;
@@ -363,8 +378,15 @@ public sealed class Ppu2C02
 
     public void WriteRegister(ushort address, byte value)
     {
-        // Every register write drives all eight lines, whatever the register does.
+        // Every register write drives all eight lines, whatever the register does,
+        // including one the chip is not yet listening to.
         RefreshIoBus(value);
+
+        // $2000, $2001, $2005 and $2006 are ignored until the reset has settled.
+        if (WarmingUp && (address & 7) is 0 or 1 or 5 or 6)
+        {
+            return;
+        }
 
         switch (address & 7)
         {
